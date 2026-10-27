@@ -1,0 +1,85 @@
+name: Release Proxynode
+on:
+  push:
+    tags: ['proxynode-v*']
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  test:
+    if: github.repository == 'ilnli/v2node'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GOEXPERIMENT: jsonv2
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Validate release tag and main ancestry
+        run: |
+          [[ "$RELEASE_TAG" =~ ^proxynode-v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          git merge-base --is-ancestor HEAD origin/main
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: python3 -m unittest discover -s tests/deployment -v
+      - run: go test ./...
+      - run: go test -race ./common/audit ./core/app/dispatcher
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    env:
+      GOEXPERIMENT: jsonv2
+      RELEASE_TAG: ${{ github.ref_name }}
+      BUILD_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: bash script/download-geodata.sh "$RUNNER_TEMP/geodata"
+      - run: bash script/package.sh "$RELEASE_TAG" "$BUILD_ARCH" dist "$RUNNER_TEMP/geodata"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: proxynode-linux-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: proxynode-linux-*
+          path: dist
+          merge-multiple: true
+      - name: Verify and publish all release assets
+        run: |
+          cd dist
+          cat proxynode-linux-*.tar.gz.sha256 > SHA256SUMS
+          sha256sum --check SHA256SUMS
+          # Keep incomplete uploads invisible to the latest-release installer.
+          if gh release view "$RELEASE_TAG" --json isDraft >/dev/null 2>&1; then
+            test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft --title "Proxynode $RELEASE_TAG" --generate-notes
+          fi
+          gh release upload "$RELEASE_TAG" proxynode-linux-*.tar.gz SHA256SUMS --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --latest

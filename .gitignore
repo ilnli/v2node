@@ -23,3 +23,7 @@ quick_update.sh
 /config.json
 *.batch
 *.batch.tmp
+
+/dist/
+/geodata/
+__pycache__/

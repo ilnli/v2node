@@ -1,0 +1,143 @@
+import hashlib
+import io
+import json
+import os
+from pathlib import Path
+import subprocess
+import tarfile
+import tempfile
+import unittest
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+class InstallerTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name)
+        self.prefix = self.base / 'root'
+        self.fixture = self.base / 'releases'
+        self.fixture.mkdir()
+        self.bin = self.base / 'bin'
+        self.bin.mkdir()
+        self.log = self.base / 'requests'
+        self.env = dict(os.environ, PATH=str(self.bin) + ':' + os.environ['PATH'],
+                        FIXTURES=str(self.fixture), REQUEST_LOG=str(self.log))
+        self.command('uname', '#!/bin/bash\nif [[ $1 == -s ]]; then echo Linux; else echo x86_64; fi\n')
+        self.command('curl', '''#!/usr/bin/env python3
+import os, pathlib, shutil, sys
+args = sys.argv[1:]
+out = args[args.index('--output') + 1]
+url = args[-1]
+with open(os.environ['REQUEST_LOG'], 'a') as f: f.write(url + '\\n')
+if not url.startswith('https://github.com/ilnli/v2node/releases/'): sys.exit(22)
+shutil.copyfile(pathlib.Path(os.environ['FIXTURES']) / url.rsplit('/', 1)[-1], out)
+''')
+        self.package('amd64')
+        self.package('arm64')
+        self.checksums()
+
+    def command(self, name, content):
+        p = self.bin / name
+        p.write_text(content)
+        p.chmod(0o755)
+
+    def package(self, arch):
+        name = f'proxynode-linux-{arch}.tar.gz'
+        files = {'proxynode': '#!/bin/sh\necho test-proxynode\n',
+                 'proxynode-manager': '#!/bin/sh\nexit 0\n',
+                 'install.sh': '#!/bin/sh\nexit 0\n',
+                 'config.example.json': json.dumps({'Audit': {'Enabled': True}, 'Nodes': []}),
+                 'geoip.dat': 'synthetic geoip', 'geosite.dat': 'synthetic geosite'}
+        with tarfile.open(self.fixture / name, 'w:gz') as archive:
+            for filename, value in files.items():
+                data = value.encode()
+                info = tarfile.TarInfo(filename)
+                info.size, info.mode = len(data), 0o755 if filename == 'proxynode' else 0o644
+                archive.addfile(info, io.BytesIO(data))
+
+    def checksums(self):
+        (self.fixture / 'SHA256SUMS').write_text(''.join(
+            hashlib.sha256(p.read_bytes()).hexdigest() + '  ' + p.name + '\n'
+            for p in sorted(self.fixture.glob('*.tar.gz'))))
+
+    def run_install(self, *args):
+        return subprocess.run(['bash', str(ROOT / 'script/install.sh'), '--prefix', str(self.prefix),
+                               '--no-service', *args], env=self.env, text=True, capture_output=True)
+
+    def test_own_release_and_audit_disabled_by_default(self):
+        result = self.run_install('--api-host', 'https://panel.example', '--node-id', '3',
+                                  '--api-key', 'key"with\\characters')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.prefix / 'usr/local/bin/proxynode').is_file())
+        config = json.loads((self.prefix / 'etc/proxynode/config.json').read_text())
+        self.assertFalse(config['Audit']['Enabled'])
+        self.assertEqual(config['Nodes'][0]['ApiKey'], 'key"with\\characters')
+        self.assertIn('https://github.com/ilnli/v2node/releases/latest/download/proxynode-linux-amd64.tar.gz', self.log.read_text())
+
+    def test_update_preserves_config_and_audit_cache(self):
+        config = self.prefix / 'etc/proxynode/config.json'
+        config.parent.mkdir(parents=True)
+        config.write_text('{"private":"keep", "Audit":{"Enabled":true}}')
+        cache = self.prefix / 'var/lib/proxynode/audit/old.batch'
+        cache.parent.mkdir(parents=True)
+        cache.write_text('pending')
+        before = config.read_bytes()
+        result = self.run_install('--version', 'proxynode-v0.1.0')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(config.read_bytes(), before)
+        self.assertEqual(cache.read_text(), 'pending')
+        self.assertIn('/releases/download/proxynode-v0.1.0/', self.log.read_text())
+
+    def test_checksum_failure_does_not_replace_binary(self):
+        binary = self.prefix / 'usr/local/bin/proxynode'
+        binary.parent.mkdir(parents=True)
+        binary.write_text('old binary')
+        (self.fixture / 'proxynode-linux-amd64.tar.gz').write_bytes(b'corrupt')
+        result = self.run_install()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(binary.read_text(), 'old binary')
+        self.assertFalse((self.prefix / 'etc/proxynode/config.json').exists())
+
+    def test_arm64_and_unknown_architecture(self):
+        self.command('uname', '#!/bin/bash\nif [[ $1 == -s ]]; then echo Linux; else echo aarch64; fi\n')
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('proxynode-linux-arm64.tar.gz', self.log.read_text())
+        self.command('uname', '#!/bin/bash\nif [[ $1 == -s ]]; then echo Linux; else echo mystery; fi\n')
+        result = self.run_install()
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_legacy_config_requires_explicit_migration(self):
+        old = self.prefix / 'etc/v2node/config.json'
+        old.parent.mkdir(parents=True)
+        old.write_text('{"Nodes":[{"NodeID":9}]}')
+        result = self.run_install()
+        self.assertNotEqual(result.returncode, 0)
+        result = self.run_install('--migrate-v2node')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.prefix / 'etc/proxynode/config.json').read_bytes(), old.read_bytes())
+
+
+    def test_migration_stops_old_service_before_starting_new(self):
+        service_log = self.base / 'services'
+        self.env['SERVICE_LOG'] = str(service_log)
+        self.command('systemctl', '#!/bin/bash\nprintf "%s\\n" "$*" >> "$SERVICE_LOG"\n')
+        for migrate in ('false', 'true'):
+            service_log.write_text('')
+            result = subprocess.run([
+                'bash', '-c',
+                'source "$1"; PREFIX="$2"; set_paths; MIGRATE="$3"; NEEDS_CONFIG=false; install_service systemd',
+                'test', str(ROOT / 'script/install.sh'), str(self.prefix), migrate,
+            ], env=self.env, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            commands = service_log.read_text().splitlines()
+            self.assertIn('restart proxynode', commands)
+            if migrate == 'true':
+                self.assertLess(commands.index('disable --now v2node'), commands.index('restart proxynode'))
+            else:
+                self.assertFalse(any('v2node' in command for command in commands))
+
+if __name__ == '__main__':
+    unittest.main()

@@ -11,6 +11,26 @@
 - 磁盘缓存最多 1024 MiB；容量不足或入口队列满时丢弃**新到记录**，保留旧记录。日志输出丢弃计数。
 - 正常退出、配置重载会将未上报内存批次落盘，重启后恢复；强制杀进程或断电可能丢失尚未落盘的记录。
 
+## 安装与升级
+
+官方发布位置：[ilnli/v2node Releases](https://github.com/ilnli/v2node/releases)。支持 Linux amd64 / arm64；需要 Bash、curl、tar、sha256sum 和 Python 3。
+
+```sh
+curl -fL https://raw.githubusercontent.com/ilnli/v2node/main/script/install.sh -o install.sh
+sudo bash install.sh --api-host https://panel.example.com --node-id 1 --api-key '节点密钥'
+```
+
+已有配置会原样保留；全新配置默认关闭审计，待面板接口可用后再开启。已有 v2node 使用 `sudo bash install.sh --migrate-v2node` 显式迁移配置和服务。也可用 `--config /path/to/config.json` 导入配置。
+
+```sh
+sudo proxynode-manager update
+sudo proxynode-manager update --version proxynode-v0.1.0
+proxynode-manager version
+sudo proxynode-manager status
+```
+
+安装和升级只从 **ilnli/v2node** 的 Release 下载，并先验证 SHA-256。配置和审计缓存不会因升级被清空。更多说明见 [部署与发布](docs/deployment.md)。
+
 ## 构建与运行
 
 需要 Go 1.27.1 或更高版本，并沿用上游 `jsonv2` 编译选项：
