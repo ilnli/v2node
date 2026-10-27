@@ -4,6 +4,6 @@ Proxynode is derived from the local v2node repository at `/root/projects/v2node`
 
 The upstream project identifies itself as `github.com/wyx2685/v2node`, based on a modified Xray core. Its license is retained verbatim in `LICENSE`. Go module/import paths are preserved to retain compatibility with generated code and dependencies; they do not imply this fork is published upstream.
 
-This fork adds bounded connection auditing, disk spooling, authenticated batch delivery, graceful audit shutdown, configuration, tests, and documentation. It uses the existing dependency versions without contacting production services.
+This fork adds bounded connection auditing, disk spooling, authenticated batch delivery, graceful audit shutdown, configuration, tests, and documentation. It retains the modified Xray dependency; other dependency updates are recorded in Git and the verification document. No production services were contacted.
 
 Upstream download/update scripts and publishing workflows are removed from this fork to avoid installing or publishing the original binary under the new project name. Build locally using this repository's README and Dockerfile.

@@ -15,3 +15,8 @@
 - Final verification: 9 top-level tests including 7 HTTP subcases pass under race detection; 58 Go files parse; diff check passes. Full Go test/build commands cannot resolve missing dependencies. Details: `docs/verification.md`.
 - User explicitly authorized dependency download/update. Retry failed due socket permission; escalated `go get` was automatically rejected by environment policy. Existing dependency versions remain unchanged.
 - No source-project or ProxyBoard changes, no remote repository, deployment or publishing.
+
+- Resumed verification: environment changed to auto-review; authorized network escalation approved. Default proxy had EOF/TLS connection errors; goproxy.cn succeeded with Go checksum verification retained.
+- Dependency check: upgraded only golang.org/x/sys v0.48.0 -> v0.49.0; other queried direct dependencies were current; modified Xray version unchanged.
+- Task 3: complete — final `go test -p 4 -count=1 ./...` and `go test -p 4 -race -count=1 ./common/audit ./core/app/dispatcher` passed with GOEXPERIMENT=jsonv2.
+- Production build: `build_assets/proxynode` built successfully; executable prints `proxynode 0.1.0-audit`. Earlier dependency/network verification blockers are resolved. No deployment or panel changes.
