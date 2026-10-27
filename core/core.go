@@ -1,7 +1,10 @@
 package core
 
 import (
+	"errors"
 	"sync"
+
+	"github.com/wyx2685/v2node/common/audit"
 
 	log "github.com/sirupsen/logrus"
 	panel "github.com/wyx2685/v2node/api/v2board"
@@ -26,6 +29,7 @@ type AddUsersParams struct {
 }
 
 type V2Core struct {
+	audit      *audit.Service
 	Config     *conf.Conf
 	ReloadCh   chan struct{}
 	access     sync.Mutex
@@ -61,21 +65,31 @@ func (v *V2Core) Start(infos []*panel.NodeInfo) error {
 	v.ihm = v.Server.GetFeature(inbound.ManagerType()).(inbound.Manager)
 	v.ohm = v.Server.GetFeature(outbound.ManagerType()).(outbound.Manager)
 	v.dispatcher = v.Server.GetFeature(routing.DispatcherType()).(*dispatcher.DefaultDispatcher)
+	if err := v.startAudit(infos); err != nil {
+		v.Server.Close()
+		v.Server = nil
+		return err
+	}
 	return nil
 }
 
 func (v *V2Core) Close() error {
 	v.access.Lock()
 	defer v.access.Unlock()
+	if v.Server == nil {
+		return nil
+	}
+	err := v.Server.Close()
+	if v.audit != nil {
+		err = errors.Join(err, v.audit.Close())
+		v.audit = nil
+	}
+	v.Server = nil
 	v.Config = nil
 	v.ihm = nil
 	v.ohm = nil
 	v.dispatcher = nil
-	err := v.Server.Close()
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
 func getCore(c *conf.Conf, infos []*panel.NodeInfo) *core.Instance {

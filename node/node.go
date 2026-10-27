@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	log "github.com/sirupsen/logrus"
@@ -51,11 +52,11 @@ func (n *Node) Start(nodes []conf.NodeConfig, core *core.V2Core) error {
 func (n *Node) Close() error {
 	var err error
 	for _, c := range n.controllers {
-		if err = c.Close(); err != nil {
-			log.Errorf("close controller failed: %v", err)
-			return err
+		if closeErr := c.Close(); closeErr != nil {
+			log.Errorf("close controller failed: %v", closeErr)
+			err = errors.Join(err, closeErr)
 		}
 	}
 	n.controllers = nil
-	return nil
+	return err
 }

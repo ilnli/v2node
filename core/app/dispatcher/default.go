@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/wyx2685/v2node/common/audit"
 	"github.com/wyx2685/v2node/common/counter"
 	"github.com/wyx2685/v2node/common/rate"
 	"github.com/wyx2685/v2node/limiter"
@@ -100,6 +101,8 @@ func (r *cachedReader) Interrupt() {
 
 // DefaultDispatcher is a default implementation of Dispatcher.
 type DefaultDispatcher struct {
+	// Audit is installed before listeners start and never mutated afterward.
+	Audit        func(tag, email string, record audit.Record)
 	ohm          outbound.Manager
 	router       routing.Router
 	policy       policy.Manager
@@ -280,6 +283,8 @@ func (d *DefaultDispatcher) Dispatch(ctx context.Context, destination net.Destin
 		ctx = session.ContextWithOutbounds(ctx, outbounds)
 	}
 	ob := outbounds[len(outbounds)-1]
+	auditTime := time.Now()
+	originalDestination := destination
 	ob.OriginalTarget = destination
 	ob.Target = destination
 	content := session.ContentFromContext(ctx)
@@ -293,16 +298,21 @@ func (d *DefaultDispatcher) Dispatch(ctx context.Context, destination net.Destin
 		return nil, err
 	}
 	if !sniffingRequest.Enabled {
-		go d.routedDispatch(ctx, outbound, destination)
+		go func() {
+			d.recordAudit(ctx, originalDestination, "", auditTime)
+			d.routedDispatch(ctx, outbound, destination)
+		}()
 	} else {
 		go func() {
 			cReader := &cachedReader{
 				reader: outbound.Reader.(*pipe.Reader),
 			}
 			outbound.Reader = cReader
+			domain := ""
 			result, err := sniffer(ctx, cReader, sniffingRequest.MetadataOnly, destination.Network)
 			if err == nil {
 				content.Protocol = result.Protocol()
+				domain = result.Domain()
 			}
 			if err == nil && d.shouldOverride(ctx, result, sniffingRequest, destination) {
 				domain := result.Domain()
@@ -322,6 +332,7 @@ func (d *DefaultDispatcher) Dispatch(ctx context.Context, destination net.Destin
 					ob.Target = destination
 				}
 			}
+			d.recordAudit(ctx, originalDestination, domain, auditTime)
 			d.routedDispatch(ctx, outbound, destination)
 		}()
 	}
@@ -339,6 +350,8 @@ func (d *DefaultDispatcher) DispatchLink(ctx context.Context, destination net.De
 		ctx = session.ContextWithOutbounds(ctx, outbounds)
 	}
 	ob := outbounds[len(outbounds)-1]
+	auditTime := time.Now()
+	originalDestination := destination
 	ob.OriginalTarget = destination
 	ob.Target = destination
 	content := session.ContentFromContext(ctx)
@@ -414,15 +427,18 @@ func (d *DefaultDispatcher) DispatchLink(ctx context.Context, destination net.De
 
 	sniffingRequest := content.SniffingRequest
 	if !sniffingRequest.Enabled {
+		d.recordAudit(ctx, originalDestination, "", auditTime)
 		d.routedDispatch(ctx, outbound, destination)
 	} else {
 		cReader := &cachedReader{
 			reader: outbound.Reader.(buf.TimeoutReader),
 		}
 		outbound.Reader = cReader
+		domain := ""
 		result, err := sniffer(ctx, cReader, sniffingRequest.MetadataOnly, destination.Network)
 		if err == nil {
 			content.Protocol = result.Protocol()
+			domain = result.Domain()
 		}
 		if err == nil && d.shouldOverride(ctx, result, sniffingRequest, destination) {
 			domain := result.Domain()
@@ -442,6 +458,7 @@ func (d *DefaultDispatcher) DispatchLink(ctx context.Context, destination net.De
 				ob.Target = destination
 			}
 		}
+		d.recordAudit(ctx, originalDestination, domain, auditTime)
 		d.routedDispatch(ctx, outbound, destination)
 	}
 

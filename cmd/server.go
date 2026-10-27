@@ -24,7 +24,7 @@ var (
 
 var serverCommand = cobra.Command{
 	Use:   "server",
-	Short: "Run v2node server",
+	Short: "Run proxynode server",
 	Run:   serverHandle,
 	Args:  cobra.NoArgs,
 }
@@ -32,7 +32,7 @@ var serverCommand = cobra.Command{
 func init() {
 	serverCommand.PersistentFlags().
 		StringVarP(&config, "config", "c",
-			"/etc/v2node/config.json", "config file path")
+			"/etc/proxynode/config.json", "config file path")
 	serverCommand.PersistentFlags().
 		BoolVarP(&watch, "watch", "w",
 			true, "watch file path change")
@@ -96,7 +96,14 @@ func serverHandle(_ *cobra.Command, _ []string) {
 		log.WithField("err", err).Error("Start core failed")
 		return
 	}
-	defer v2core.Close()
+	defer func() {
+		if err := nodes.Close(); err != nil {
+			log.WithError(err).Error("Close nodes failed")
+		}
+		if err := v2core.Close(); err != nil {
+			log.WithError(err).Error("Close core/audit failed")
+		}
+	}()
 	//node
 	err = nodes.Start(c.NodeConfigs, v2core)
 	if err != nil {
@@ -127,7 +134,7 @@ func serverHandle(_ *cobra.Command, _ []string) {
 		select {
 		case <-osSignals:
 			log.Info("收到退出信号，正在关闭程序...")
-			os.Exit(0)
+			return
 		case <-reloadCh:
 			log.Info("收到重启信号，正在重新加载配置...")
 			if err := reload(config, &nodes, &v2core); err != nil {
@@ -194,6 +201,8 @@ func reload(config string, nodes **node.Node, v2core **core.V2Core) error {
 	}
 
 	if err := newNodes.Start(newConf.NodeConfigs, newCore); err != nil {
+		newNodes.Close()
+		newCore.Close()
 		return err
 	}
 

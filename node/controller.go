@@ -95,6 +95,9 @@ func (c *Controller) Start(x *core.V2Core) error {
 
 // Close implement the Close() function of the service interface
 func (c *Controller) Close() error {
+	if c.server == nil || c.tag == "" {
+		return nil
+	}
 	limiter.DeleteLimiter(c.tag)
 	if c.nodeInfoMonitorPeriodic != nil {
 		c.nodeInfoMonitorPeriodic.Close()

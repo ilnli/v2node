@@ -16,3 +16,10 @@ output/*
 .idea/*
 new.sh
 quick_update.sh
+
+# Local Proxynode configuration, binaries and audit data
+/build_assets/
+/audit-cache/
+/config.json
+*.batch
+*.batch.tmp

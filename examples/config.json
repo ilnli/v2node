@@ -1,0 +1,18 @@
+{
+  "Log": {"Level": "info", "Output": "", "Access": "none"},
+  "Audit": {
+    "Enabled": true,
+    "Directory": "/var/lib/proxynode/audit",
+    "MemoryMiB": 64,
+    "DiskMiB": 1024
+  },
+  "Nodes": [
+    {
+      "ApiHost": "https://panel.example.com",
+      "NodeID": 1,
+      "ApiKey": "replace-with-node-token",
+      "Timeout": 15,
+      "RetryCount": 1
+    }
+  ]
+}
