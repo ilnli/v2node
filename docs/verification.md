@@ -53,3 +53,12 @@ GO111MODULE=off go test -race -count=1 -v ./common/audit
 - 固定 geodata 发布版本 `202610262207` 的两个数据文件均通过 SHA-256 校验。
 - Linux amd64 实际静态安装包构建、校验、临时目录安装与 `version` 执行通过；下载由测试 transport 映射到实际构建产物，没有安装系统服务。
 - 独立部署/发布代码审查未发现重要问题。后续 GitHub CI 和真实 Release 验证另行记录。
+
+## 首个真实 Fork Release 验证
+
+- 推送：`ilnli/v2node` 的 `main`，保留上游历史；发布代码提交 `ddf8bcffed036ca4223c332a8dfcdaa804ec8491`，未强制推送。
+- [main 测试工作流](https://github.com/ilnli/v2node/actions/runs/40539116678)：成功。
+- [Release Proxynode 工作流](https://github.com/ilnli/v2node/actions/runs/40539188130)：测试、amd64、arm64 和发布作业全部成功。
+- [proxynode-v0.1.0 Release](https://github.com/ilnli/v2node/releases/tag/proxynode-v0.1.0)：已公开，包含 `proxynode-linux-amd64.tar.gz`、`proxynode-linux-arm64.tar.gz`、`SHA256SUMS`。
+- 使用项目安装脚本从该真实 Release 下载并校验 amd64 包，暂存安装到 `/tmp/proxynode-release-check`，运行输出 `proxynode proxynode-v0.1.0`；新配置审计默认关闭，没有操作系统服务或生产节点。下载通过 IPv4 完成。
+- systemd/OpenRC 实机启停未在生产环境执行；迁移顺序通过命令替身测试验证。

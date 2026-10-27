@@ -31,12 +31,12 @@ Files: `script/install.sh`, `script/proxynode.sh`, `script/v2node.sh`, `tests/de
 ### Task 2: Package and release workflow
 
 Files: `script/package.sh`, `script/download-geodata.sh`, `.github/workflows/{test,release}.yml`, README and deployment documentation.
-- [ ] Build static amd64/arm64 archives with consistent asset names and checksum manifest.
+- [x] Build static amd64/arm64 archives with consistent asset names and checksum manifest (both GitHub matrix builds passed).
 - [x] Configure tag-triggered tests/build/release; minimal permissions and no upstream publication.
 - [x] Validate workflow/shell, full Go tests and local amd64 package/checksum/staged execution. ARM64 verification will run in CI.
 
 ### Task 3: Publish and verify
 
-- [ ] Push main without force, tag proxynode-v0.1.0, monitor fork CI.
-- [ ] Confirm both release assets, checksum download and staged installer against real release.
-- [ ] Record results and commit any fixes required by actual CI.
+- [x] Push main without force, tag proxynode-v0.1.0, monitor fork CI: both workflows succeeded.
+- [x] Confirm both release assets, checksum download and staged installer against real release.
+- [x] Record results; no CI fixes were required. See docs/verification.md.
