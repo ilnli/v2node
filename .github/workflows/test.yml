@@ -24,4 +24,13 @@ jobs:
       - run: bash -n script/install.sh script/proxynode.sh script/v2node.sh script/package.sh script/download-geodata.sh
       - run: go test ./...
       - run: go test -race ./common/audit ./core/app/dispatcher
-      - run: go build -trimpath -o build_assets/proxynode .
+      - run: CGO_ENABLED=0 go build -trimpath -o build_assets/proxynode .
+      - name: Verify real Mihomo VLESS interoperability
+        run: PROXYNODE_BIN="$PWD/build_assets/proxynode" bash script/test-mihomo.sh --output "$RUNNER_TEMP/mihomo-interop"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: mihomo-interop-${{ github.run_id }}
+          path: ${{ runner.temp }}/mihomo-interop
+          retention-days: 7
+          if-no-files-found: warn

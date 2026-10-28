@@ -148,6 +148,10 @@ func buildInbound(nodeInfo *panel.NodeInfo, tag string) (*core.InboundHandlerCon
 				},
 				RejectUnknownSNI: nodeInfo.Common.CertInfo.RejectUnknownSni,
 			}
+			if len(nodeInfo.Common.TlsSettings.ALPN) > 0 {
+				alpn := coreConf.StringList(nodeInfo.Common.TlsSettings.ALPN)
+				in.StreamSetting.TLSSettings.ALPN = &alpn
+			}
 			if nodeInfo.Type == "hysteria2" || nodeInfo.Type == "tuic" {
 				alpnList := &coreConf.StringList{"h3"}
 				in.StreamSetting.TLSSettings.ALPN = alpnList

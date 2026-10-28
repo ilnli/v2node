@@ -1,6 +1,12 @@
 # Xray-core 修改版对比与 Mihomo 升级约束
 
-核对日期：2026-10-27。本文是源码与版本核对，**不是完整协议互通测试报告**。
+## 2026-10-28 同步状态
+
+现已建立 [ilnli/Xray-core](https://github.com/ilnli/Xray-core)，将官方 v26.10.21 合入 wyx2685 的历史，保留扩展。同步提交为 [`d84c11216aba`](https://github.com/ilnli/Xray-core/commit/d84c11216aba6397cc7e30b5cc3b1aacde59dd33)，proxynode 的 `replace` 固定到该提交；Go 构建版本改为 1.27.3。
+
+此次包含下文提到的 Go 1.27.3+ Vision 修复及 REALITY、gRPC、Mux 等上游更新。非生成的 VLESS、Vision、REALITY、XHTTP 代码与官方 v26.10.21 一致。自定义 dispatcher 同步上游新增的路由错误日志，保留审计和限速。真实互通范围与结果单独记录在 [Mihomo 互通说明](mihomo-interop.md)。
+
+以下是 **2026-10-27 升级前快照**，其中“当前 fork”指原 wyx2685 提交；保留它用于解释为何需要自有 fork，不代表现行依赖仍缺少更新。
 
 ## 比较对象
 

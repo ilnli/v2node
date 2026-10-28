@@ -33,7 +33,7 @@ sudo proxynode-manager status
 
 ## 构建与运行
 
-当前发行构建使用 Go 1.27.1，并沿用上游 `jsonv2` 编译选项。升级 Go/Xray 前须执行 [Mihomo VLESS 兼容验收](docs/xray-core-comparison.md)，尤其注意 Go 1.27.3+ 的 Vision 修复：
+当前构建使用 Go 1.27.3 与 `jsonv2`，依赖自有 [Xray-core fork](https://github.com/ilnli/Xray-core)，已同步官方 v26.10.21 并保留 AnyTLS/TUIC 扩展。升级 Go/Xray 前须执行 [Mihomo VLESS 互通测试](docs/mihomo-interop.md)：
 
 ```sh
 GOEXPERIMENT=jsonv2 go build -trimpath -o build_assets/proxynode .

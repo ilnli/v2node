@@ -79,6 +79,7 @@ type BaseConfig struct {
 }
 
 type TlsSettings struct {
+	ALPN             []string `json:"alpn,omitempty"`
 	ServerName       string   `json:"server_name"`
 	ServerNames      []string `json:"server_names"`
 	Dest             string   `json:"dest"`

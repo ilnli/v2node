@@ -62,3 +62,11 @@ GO111MODULE=off go test -race -count=1 -v ./common/audit
 - [proxynode-v0.1.0 Release](https://github.com/ilnli/v2node/releases/tag/proxynode-v0.1.0)：已公开，包含 `proxynode-linux-amd64.tar.gz`、`proxynode-linux-arm64.tar.gz`、`SHA256SUMS`。
 - 使用项目安装脚本从该真实 Release 下载并校验 amd64 包，暂存安装到 `/tmp/proxynode-release-check`，运行输出 `proxynode proxynode-v0.1.0`；新配置审计默认关闭，没有操作系统服务或生产节点。下载通过 IPv4 完成。
 - systemd/OpenRC 实机启停未在生产环境执行；迁移顺序通过命令替身测试验证。
+
+## 2026-10-28 自有 Xray 同步验证
+
+- 内核：`ilnli/Xray-core@d84c11216aba6397cc7e30b5cc3b1aacde59dd33`，合并官方 v26.10.21 与 wyx2685 原分支，双方祖先关系确认；内核相关测试、独立构建及 [fork CI](https://github.com/ilnli/Xray-core/actions/runs/40703985011) 通过。
+- proxynode：Go 1.27.3、实际远程模块 pin、CGO_ENABLED=0 构建通过；全项目 `go test -p 4 -count=1 ./...`、审计/dispatcher `-race`、6 项部署测试、Bash/actionlint 检查通过。
+- 新增 ALPN 映射：`TestPanelTLSALPNReachesInbound` 验证面板 JSON 到内核的 H3 参数，以及未指定时保持默认；先复现缺失映射再通过修复。
+- 真实 Mihomo v1.19.33 对最终静态二进制：31/31 配置组合通过，含 TCP/TLS/REALITY、Vision、WS/early-data、HTTPUpgrade/fast-open、gRPC、XHTTP H1/H2/H3、三种 Encryption 模式和 XUDP；证书指纹及错误 UUID 拒绝检查通过。详情、校验值和未覆盖范围见 [互通文档](mihomo-interop.md)。
+- 独立审查未发现需要修复的问题。生产服务未部署，面板接收审计及订阅模板尚未修改；REALITY 客户端必须先启用混合密钥交换选项。
