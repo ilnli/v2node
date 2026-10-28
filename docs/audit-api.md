@@ -1,6 +1,6 @@
 # 节点审计上报接口（版本 1）
 
-这是 proxynode 与 ProxyBoard PostgreSQL 面板已实现的接口约定。现有流量和在线用户接口保持不变。请先完成面板数据库升级和管理页面部署，再启用节点 `Audit.Enabled`；原 V2Board 不支持此接口。
+这是 proxynode 与 ProxyBoard 面板已实现的接口约定。现有流量和在线用户接口保持不变。请先完成面板数据库升级和管理页面部署，再启用节点 `Audit.Enabled`；原 V2Board 不支持此接口。
 
 ## 请求
 
