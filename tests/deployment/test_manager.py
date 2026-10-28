@@ -1,5 +1,8 @@
 import json
 import os
+import pty
+import select
+import time
 from pathlib import Path
 import subprocess
 import tempfile
@@ -60,6 +63,50 @@ class ManagerTests(unittest.TestCase):
         self.assertEqual(removed.returncode, 0, removed.stderr)
         self.assertEqual([n['NodeID'] for n in json.loads(self.config.read_text())['Nodes']], [101, 103])
         self.assertFalse(self.network_log.exists(), 'configuration commands must not contact network/services')
+
+    def test_short_commands_and_positional_ids(self):
+        result = self.run_manager('add', '102,103', '--api-host', 'https://panel.example', '--api-key', 'key')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        listing = self.run_manager('list')
+        self.assertEqual(listing.returncode, 0, listing.stderr)
+        self.assertIn('103', listing.stdout)
+        result = self.run_manager('del', '102')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([n['NodeID'] for n in json.loads(self.config.read_text())['Nodes']], [101, 103])
+
+    def test_menu_lists_nodes_and_exits_in_terminal(self):
+        master, slave = pty.openpty()
+        process = subprocess.Popen(['bash', str(ROOT / 'script/proxynode.sh'), 'menu',
+                                    '--config', str(self.config)], stdin=slave, stdout=slave,
+                                   stderr=slave, env=self.env)
+        os.close(slave)
+        output = b''
+        try:
+            os.write(master, b'1\n0\n')
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                if select.select([master], [], [], 0.1)[0]:
+                    try:
+                        part = os.read(master, 8192)
+                    except OSError:
+                        break
+                    if not part:
+                        break
+                    output += part
+                elif process.poll() is not None:
+                    break
+            self.assertEqual(process.wait(timeout=1), 0, output.decode(errors='replace'))
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            os.close(master)
+        text = output.decode()
+        self.assertIn('pnode', text)
+        self.assertIn('101', text)
+        self.assertIn('https://panel.example', text)
+        self.assertNotIn('original-secret', text)
+        self.assertFalse(self.network_log.exists())
 
     def test_duplicate_and_bad_batch_are_atomic(self):
         before = self.config.read_bytes()

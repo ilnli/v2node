@@ -28,34 +28,40 @@ sudo bash install.sh --api-host https://panel.example.com --node-id 1 --api-key 
 | 内容 | 路径 |
 | --- | --- |
 | 节点程序 | `/usr/local/bin/proxynode` |
-| 管理命令 | `/usr/local/bin/proxynode-manager` |
+| 管理命令 | `/usr/local/bin/pnode`（指向 `proxynode-manager`，长命令仍兼容） |
 | 配置及 geoip/geosite | `/etc/proxynode/` |
 | 审计缓存 | `/var/lib/proxynode/audit/` |
 | 服务名 | `proxynode` |
 
-已有配置原样保留，传入的新面板参数不会覆盖它。新建配置默认 `Audit.Enabled=false`；没有传配置或完整面板参数时生成空 `Nodes` 列表，不启动服务；执行 `proxynode-manager add-node` 添加后，再执行 `proxynode-manager enable` 和 `proxynode-manager start`。面板审计接口准备好后再开启审计。
+已有配置原样保留，传入的新面板参数不会覆盖它。新建配置默认 `Audit.Enabled=false`；没有传配置或完整面板参数时生成空 `Nodes` 列表，不启动服务；执行 `pnode add` 添加后，再执行 `pnode enable` 和 `pnode start`。面板审计接口准备好后再开启审计。
 
 ```sh
-sudo proxynode-manager update
-sudo proxynode-manager update --version proxynode-v0.1.0
-sudo proxynode-manager restart
-sudo proxynode-manager log
+sudo pnode update
+sudo pnode update --version proxynode-v0.1.0
+sudo pnode restart
+sudo pnode log
 ```
 
 升级先下载并校验整个包，再替换二进制和资源，保留配置与审计缓存。校验失败不替换现有程序。脚本不安装系统依赖，也不自动修改防火墙。
 
 ## 多节点添加、查看和删除
 
+终端输入 `pnode` 即可打开中文数字菜单。无终端时输出帮助，不等待输入。快捷命令是 `pnode add`、`pnode list`、`pnode del`、`pnode restart` 和 `pnode update`；例如 `pnode add 101,102` 会继续提示面板地址和密钥，`pnode del 102` 删除指定 ID。
+
+已有旧版本需先运行一次 `sudo proxynode-manager update`，安装新入口。`pnode` 使用相对符号链接，因此管理脚本升级后入口仍有效；安装时若该名称被其他程序占用会报错，不覆盖无关文件。原有长入口和长子命令保持兼容。
+
+菜单也可用 `pnode menu --config FILE` 管理指定配置；该选项仅影响菜单中的节点操作，服务操作仍针对系统的 proxynode 服务。
+
 首次安装可以用 `--node-ids 101,102,103` 或重复 `--node-id` 配置同一面板下的多个 v2node 项；协议在面板的每个项中设置，本地不填写协议名。
 
 ```sh
-sudo proxynode-manager add-node
+sudo pnode add
 # 交互填写面板地址、101,102,103 和密钥；密钥输入不回显
-sudo proxynode-manager list-nodes
-sudo proxynode-manager add-node --api-host https://panel.example.com --node-ids 104,105
+sudo pnode list
+sudo pnode add --api-host https://panel.example.com --node-ids 104,105
 # 省略 --api-key 时，终端继续提示输入密钥
-sudo proxynode-manager remove-node --api-host https://panel.example.com --node-id 104
-sudo proxynode-manager restart
+sudo pnode del --api-host https://panel.example.com --node-id 104
+sudo pnode restart
 ```
 
 自动化可显式传入 `--api-key KEY`；交互输入避免密钥进入 shell 历史。节点操作支持 `--config FILE`，默认 `/etc/proxynode/config.json`。不联网获取协议、检查凭据或报告安装信息，列表只输出节点 ID 和 API 地址。

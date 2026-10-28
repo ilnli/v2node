@@ -21,7 +21,7 @@ usage() {
                   [--migrate-v2node] [--no-service] [--prefix DIR]
 只从 ilnli/v2node 的 GitHub Release 下载并校验二进制。
 默认保留已有 /etc/proxynode/config.json；迁移旧 v2node 必须显式指定。
---node-id 可重复使用；已有配置请用 proxynode-manager add-node 追加节点。
+--node-id 可重复使用；已有配置请用 pnode add 追加节点。
 --prefix 必须配合 --no-service，可用于暂存安装而不修改系统服务。
 HELP
 }
@@ -143,6 +143,9 @@ PYIDS
         [[ -z $CONFIG_SOURCE ]] || fail "--config 与面板参数不能同时使用"
     fi
     set_paths
+    if [[ -e "$BIN_DIR/pnode" || -L "$BIN_DIR/pnode" ]]; then
+        [[ -L "$BIN_DIR/pnode" && ( $(readlink "$BIN_DIR/pnode") == proxynode-manager || $(readlink "$BIN_DIR/pnode") == "$BIN_DIR/proxynode-manager" ) ]] || fail "pnode 已被其他程序占用: $BIN_DIR/pnode"
+    fi
     if [[ -f "$PREFIX/etc/v2node/config.json" && ! -f "$CONFIG_DIR/config.json" && $MIGRATE == false ]]; then
         fail "发现旧 v2node 配置，请使用 --migrate-v2node 显式迁移"
     fi
@@ -197,15 +200,16 @@ PY
     install -m 755 "$temp/proxynode" "$BIN_DIR/proxynode.new"
     mv -f "$BIN_DIR/proxynode.new" "$BIN_DIR/proxynode"
     install -m 755 "$temp/proxynode-manager" "$BIN_DIR/proxynode-manager"
+    ln -sfn proxynode-manager "$BIN_DIR/pnode"
     install -m 755 "$temp/install.sh" "$STATE_DIR/install.sh"
     install -m 644 "$temp/geoip.dat" "$temp/geosite.dat" "$CONFIG_DIR/"
     if [[ $NO_SERVICE == false ]]; then install_service "$manager"; fi
     if [[ ! -f "$temp/new-config.json" && ${#NODE_IDS[@]} -gt 0 ]]; then
-        echo '已有配置已保留；如需添加节点，请执行 proxynode-manager add-node。'
+        echo '已有配置已保留；如需添加节点，请执行 pnode add。'
     fi
     echo "已从 $REPOSITORY 安装 $archive；配置: $CONFIG_DIR/config.json"
     if [[ $NEEDS_CONFIG == true ]]; then
-        echo "请先执行 proxynode-manager add-node 添加节点，再执行: proxynode-manager enable && proxynode-manager start"
+        echo "请先执行 pnode add 添加节点，再执行: pnode enable && pnode start"
     fi
     rm -rf -- "$temp"
     trap - EXIT

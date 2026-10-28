@@ -81,7 +81,7 @@ shutil.copyfile(pathlib.Path(os.environ['FIXTURES']) / url.rsplit('/', 1)[-1], o
         self.assertEqual(result.returncode, 0, result.stderr)
         config = json.loads((self.prefix / 'etc/proxynode/config.json').read_text())
         self.assertEqual(config['Nodes'], [])
-        self.assertIn('add-node', result.stdout)
+        self.assertIn('pnode add', result.stdout)
 
     def test_multiple_ids_and_no_upstream_reporting(self):
         result = self.run_install('--api-host', 'https://panel.example', '--node-ids', '101,102',
@@ -93,6 +93,25 @@ shutil.copyfile(pathlib.Path(os.environ['FIXTURES']) / url.rsplit('/', 1)[-1], o
             'https://github.com/ilnli/v2node/releases/latest/download/proxynode-linux-amd64.tar.gz',
             'https://github.com/ilnli/v2node/releases/latest/download/SHA256SUMS',
         ])
+
+    def test_short_entry_is_installed_and_preserved_on_update(self):
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        entry = self.prefix / 'usr/local/bin/pnode'
+        self.assertTrue(entry.is_symlink())
+        self.assertEqual(os.readlink(entry), 'proxynode-manager')
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(entry.is_symlink())
+
+    def test_existing_unrelated_short_command_is_not_overwritten(self):
+        entry = self.prefix / 'usr/local/bin/pnode'
+        entry.parent.mkdir(parents=True)
+        entry.write_text('unrelated program')
+        result = self.run_install()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(entry.read_text(), 'unrelated program')
+        self.assertFalse(self.log.exists(), 'detect conflict before downloading or mutating installation')
 
     def test_update_preserves_config_and_audit_cache(self):
         config = self.prefix / 'etc/proxynode/config.json'

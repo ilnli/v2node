@@ -3,15 +3,17 @@ set -euo pipefail
 fail() { echo "错误: $*" >&2; exit 1; }
 usage() {
     cat <<'HELP'
-用法: proxynode-manager COMMAND [OPTIONS]
-  add-node     [--api-host URL] [--node-ids 101,102,103] [--api-key KEY]
-  remove-node  [--api-host URL] [--node-id ID | --node-ids IDS]
-  list-nodes
-  config | start | stop | restart | status | enable | disable | log | version
-  update [--version proxynode-vX.Y.Z] | install [安装参数]
-节点命令支持 --config FILE，默认 /etc/proxynode/config.json。
---node-id 可以重复使用。add-node 缺少参数时交互输入，密钥不回显。
-修改前校验并保留一份 config.json.bak；完成后执行 restart 确保生效。
+用法: pnode [命令]
+  不带参数      打开中文菜单（终端中）
+  add [ID,...]  添加节点，按提示输入面板和密钥
+  list          查看节点
+  del [ID,...]  删除节点
+  restart       重启服务，使配置生效
+  update        更新程序和管理脚本
+  start | stop | status | enable | disable | log | config | version
+节点命令支持 --api-host URL、--node-id ID、--node-ids IDS、--api-key KEY。
+--config FILE 可指定节点配置；原 proxynode-manager 命令及长子命令继续兼容。
+修改前校验并保留一份 config.json.bak；密钥交互输入不回显。
 HELP
 }
 
@@ -31,7 +33,14 @@ manage_nodes() {
                 esac
                 shift 2 ;;
             -h|--help) usage; return ;;
-            *) fail "未知参数: $1" ;;
+            *)
+                if [[ $action != list-nodes && $1 != -* ]]; then
+                    node_ids+=("$1")
+                    shift
+                else
+                    fail "未知参数: $1"
+                fi ;;
+
         esac
     done
     if [[ $action == add-node && -z $api_host && -t 0 ]]; then
@@ -150,14 +159,64 @@ try:
         atomic_write(path, (json.dumps(config, ensure_ascii=False, indent=2) + '\n').encode(), owner)
     verb = '添加' if action == 'add-node' else '删除'
     print(f"已{verb}节点 {', '.join(map(str, ids))}；配置: {path}；备份: {backup}")
-    print('请执行 proxynode-manager restart，确保运行中的服务加载新配置。')
+    print('请执行 pnode restart，确保运行中的服务加载新配置。')
 except (OSError, ValueError) as exc:
     print(f'错误: {exc}', file=sys.stderr)
     sys.exit(1)
 PY
 }
 
-case "${1:-help}" in
+show_menu() {
+    [[ -t 0 ]] || fail '菜单需要终端；可运行 pnode help 查看命令'
+    if (( $# )); then
+        [[ $# == 2 && $1 == --config && -n $2 ]] || fail '用法: pnode menu [--config FILE]'
+    fi
+    local choice action
+    local -a options=()
+    while true; do
+        cat <<'MENU'
+
+pnode 管理菜单
+  1. 查看节点        2. 添加节点
+  3. 删除节点        4. 重启服务
+  5. 服务状态        6. 启动服务
+  7. 停止服务        8. 更新程序
+  9. 查看日志        0. 退出
+MENU
+        read -r -p '请选择 [0-9]: ' choice || return 0
+        options=()
+        case "$choice" in
+            1) action=list; options=("$@") ;;
+            2) action=add; options=("$@") ;;
+            3) action=del; options=("$@") ;;
+            4) action=restart ;;
+            5) action=status ;;
+            6) action=start ;;
+            7) action=stop ;;
+            8) action=update ;;
+            9) action=log ;;
+            0) return 0 ;;
+            *) echo '请输入 0 到 9。'; continue ;;
+        esac
+        if bash "$0" "$action" "${options[@]}"; then
+            # A successful update may replace this running script; reopen the menu.
+            [[ $action != update ]] || return 0
+        else
+            echo '操作未完成，请根据上述错误检查后重试。' >&2
+        fi
+    done
+}
+
+if (( $# == 0 )); then
+    if [[ -t 0 ]]; then show_menu; else usage; fi
+    exit 0
+fi
+
+case "$1" in
+    menu) shift; show_menu "$@" ;;
+    add) shift; manage_nodes add-node "$@" ;;
+    list) shift; manage_nodes list-nodes "$@" ;;
+    del) shift; manage_nodes remove-node "$@" ;;
     add-node|remove-node|list-nodes) manage_nodes "$@" ;;
     help|-h|--help) usage ;;
     update|install)
