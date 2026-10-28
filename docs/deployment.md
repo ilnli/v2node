@@ -37,7 +37,7 @@ sudo bash install.sh --api-host https://panel.example.com --node-id 1 --api-key 
 
 ```sh
 sudo pnode update
-sudo pnode update --version proxynode-v0.1.0
+sudo pnode update --version proxynode-v0.2.2
 sudo pnode restart
 sudo pnode log
 ```
@@ -87,7 +87,7 @@ sudo bash install.sh --migrate-v2node
 ## 无服务安装与暂存验证
 
 ```sh
-bash install.sh --prefix /tmp/proxynode-staging --no-service --version proxynode-v0.1.0
+bash install.sh --prefix /tmp/proxynode-staging --no-service --version proxynode-v0.2.2
 ```
 
 此模式把所有文件安装到指定前缀下，不操作系统服务。可用于检查发布包；直接部署且自行管理进程时使用 `--no-service`。

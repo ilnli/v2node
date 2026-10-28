@@ -85,3 +85,11 @@ GO111MODULE=off go test -race -count=1 -v ./common/audit
 - [主分支 CI](https://github.com/ilnli/v2node/actions/runs/40711352244) 与 [Release CI](https://github.com/ilnli/v2node/actions/runs/40711364652) 全部成功，发布门槛继续执行 Go/竞态及 31 组 Mihomo 互通检查。
 - [proxynode-v0.2.1](https://github.com/ilnli/v2node/releases/tag/proxynode-v0.2.1) 已公开，包含 amd64/arm64 安装包及 SHA256SUMS。内核和依赖版本未变。
 - 真实 Release 下载校验并暂存安装到 `/tmp/proxynode-v021-install` 后，发布包中的管理脚本完成批量添加 101/102/103、列表、删除 102 和备份验证；其内容与提交的脚本逐字节一致，Audit.Enabled=false。首次连接停滞后使用 IPv4/HTTP1.1 重试成功，未操作系统服务或生产配置。
+
+## 2026-10-28 pnode 简短入口 v0.2.2
+
+- 用户选定入口 `pnode`；实现提交 `4eaab0fe6a057d3a6c0b64ed46150132ff6885ed`。增加相对符号链接、中文菜单、add/list/del 别名及位置参数；长入口和命令兼容。
+- 18 项部署测试通过，包括真实 PTY 菜单、短命令、安装/重复更新链接和同名无关文件保护；交互终端确认不带参数会打开菜单，输入 0 正常退出。独立审查没有待修复问题。
+- [主分支 CI](https://github.com/ilnli/v2node/actions/runs/40716636550) 与 [Release CI](https://github.com/ilnli/v2node/actions/runs/40716654553) 全部成功，发布门槛继续执行 Go/竞态及 31 项 Mihomo 互通检查。
+- [proxynode-v0.2.2](https://github.com/ilnli/v2node/releases/tag/proxynode-v0.2.2) 已发布，包含 amd64/arm64 和校验清单；内核、依赖及审计逻辑未变。
+- 真实 Release 经安装脚本下载、校验并暂存到 `/tmp/proxynode-v022-install`；实际 `pnode` 相对链接、位置参数批量添加/删除、列表及 PTY 菜单查看/退出全部验证通过。安装的管理脚本与提交逐字节一致，未操作系统服务。

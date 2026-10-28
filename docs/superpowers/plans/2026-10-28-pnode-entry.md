@@ -6,8 +6,10 @@
 
 - [x] Add focused behavioral checks for alias operations, menu interaction, installed symlink and conflicting pre-existing commands.
 - [x] Implement aliases/menu and installer entry; update user-facing help/docs; run deployment tests and shell checks.
-- [ ] Review this diff once, push and publish v0.2.2 through existing CI; validate released pnode entry in staging.
+- [x] Review this diff once, push and publish v0.2.2 through existing CI; validate released pnode entry in staging.
 
 **Constraints:** Preserve long command compatibility, configuration backups and no-telemetry behavior. Do not overwrite unrelated existing pnode files. No production deployment or service changes from this development session.
 
 Verification: four new behavior tests failed before implementation; all 18 deployment tests now pass, including real PTY menu list/exit and conflicting command protection. Bash syntax and diff checks passed.
+
+Independent review found no actionable issues. Published v0.2.2; main CI 40716636550 and release CI 40716654553 passed. Staged released pnode link, short commands and menu were verified.

@@ -24,7 +24,7 @@ sudo bash install.sh --api-host https://panel.example.com --node-ids 101,102,103
 
 ```sh
 sudo pnode update
-sudo pnode update --version proxynode-v0.1.0
+sudo pnode update --version proxynode-v0.2.2
 pnode version
 sudo pnode status
 ```
