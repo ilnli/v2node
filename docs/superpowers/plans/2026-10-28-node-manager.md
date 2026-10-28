@@ -14,7 +14,7 @@
 
 - [x] Add failing behavioral tests for batch add/list/remove, preservation/backup, duplicate and ambiguous rejection, invalid input, no manager networking, installer multi-ID handling and exact own-release download requests.
 - [x] Implement manager commands, interactive prompts/help, atomic JSON mutation and installer multiple IDs. Run deployment suite and Bash syntax checks.
-- [ ] Document commands/privacy scope and publish v0.2.1 notes, review new code once, push and run own CI/release. Verify actual packaged manager in a staging installation.
+- [x] Document commands/privacy scope and publish v0.2.1 notes, review new code once, push and run own CI/release. Verify actual packaged manager in a staging installation.
 
 ## Decisions
 
@@ -22,3 +22,4 @@ Use commands with optional prompts rather than a new menu framework. Persist the
 
 - Verification: feature tests failed before implementation; 14 deployment tests now pass, including concurrent writes and blank initial setup. Shell syntax and diff checks pass. No kernel or dependency modifications.
 - Independent focused review found no actionable issues. Real TTY add of three IDs verified hidden key input; list output contains no key.
+- Published proxynode-v0.2.1 at ccd22a6. Main CI 40711352244 and release CI 40711364652 passed. Actual released manager was staged, compared to source, and verified with add/list/remove and backup operations.
