@@ -17,7 +17,7 @@
 
 ```sh
 curl -fL https://raw.githubusercontent.com/ilnli/v2node/main/script/install.sh -o install.sh
-sudo bash install.sh --api-host https://panel.example.com --node-id 1 --api-key '节点密钥'
+sudo bash install.sh --api-host https://panel.example.com --node-ids 101,102,103 --api-key '节点密钥'
 ```
 
 已有配置会原样保留；全新配置默认关闭审计，待面板接口可用后再开启。已有 v2node 使用 `sudo bash install.sh --migrate-v2node` 显式迁移配置和服务。也可用 `--config /path/to/config.json` 导入配置。
@@ -30,6 +30,21 @@ sudo proxynode-manager status
 ```
 
 安装和升级只从 **ilnli/v2node** 的 Release 下载，并先验证 SHA-256。配置和审计缓存不会因升级被清空。更多说明见 [部署与发布](docs/deployment.md)。
+
+## 管理多个节点
+
+一个 proxynode 进程可以加载多个面板 **v2node 项**，分别在面板中选择 VLESS、Hysteria2、Shadowsocks 等协议，配置不同的节点 ID 和不冲突的监听端口。
+
+```sh
+sudo proxynode-manager add-node        # 交互输入面板地址、一个或多个 ID、密钥（不回显）
+sudo proxynode-manager list-nodes      # 只显示 ID 和面板地址，不显示密钥
+sudo proxynode-manager remove-node --node-id 102
+sudo proxynode-manager restart
+```
+
+已有相同 ID 分属多个面板时，删除需加 `--api-host URL`。添加也可用 `add-node --api-host URL --node-ids 102,103`，终端会继续提示输入密钥。每次修改保留其他设置，校验后原子写入，并将前一份配置保存为 `config.json.bak`（权限 0600）；完成后执行 `restart` 确保生效。新安装未提供面板参数时，节点列表为空，添加后再启用服务。
+
+部署和管理脚本没有广告、安装计数或向原项目上报的请求。配置操作不联网；安装/更新只下载自有仓库的发布资源。向自有面板提交流量、在线状态及启用后的审计数据仍是业务功能。
 
 ## 构建与运行
 

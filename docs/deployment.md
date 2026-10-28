@@ -33,7 +33,7 @@ sudo bash install.sh --api-host https://panel.example.com --node-id 1 --api-key 
 | 审计缓存 | `/var/lib/proxynode/audit/` |
 | 服务名 | `proxynode` |
 
-已有配置原样保留，传入的新面板参数不会覆盖它。新建配置默认 `Audit.Enabled=false`；没有传配置或完整面板参数时只生成模板，不启动服务，填好配置后执行 `proxynode-manager enable` 和 `proxynode-manager start`。面板审计接口准备好后再开启审计。
+已有配置原样保留，传入的新面板参数不会覆盖它。新建配置默认 `Audit.Enabled=false`；没有传配置或完整面板参数时生成空 `Nodes` 列表，不启动服务；执行 `proxynode-manager add-node` 添加后，再执行 `proxynode-manager enable` 和 `proxynode-manager start`。面板审计接口准备好后再开启审计。
 
 ```sh
 sudo proxynode-manager update
@@ -43,6 +43,32 @@ sudo proxynode-manager log
 ```
 
 升级先下载并校验整个包，再替换二进制和资源，保留配置与审计缓存。校验失败不替换现有程序。脚本不安装系统依赖，也不自动修改防火墙。
+
+## 多节点添加、查看和删除
+
+首次安装可以用 `--node-ids 101,102,103` 或重复 `--node-id` 配置同一面板下的多个 v2node 项；协议在面板的每个项中设置，本地不填写协议名。
+
+```sh
+sudo proxynode-manager add-node
+# 交互填写面板地址、101,102,103 和密钥；密钥输入不回显
+sudo proxynode-manager list-nodes
+sudo proxynode-manager add-node --api-host https://panel.example.com --node-ids 104,105
+# 省略 --api-key 时，终端继续提示输入密钥
+sudo proxynode-manager remove-node --api-host https://panel.example.com --node-id 104
+sudo proxynode-manager restart
+```
+
+自动化可显式传入 `--api-key KEY`；交互输入避免密钥进入 shell 历史。节点操作支持 `--config FILE`，默认 `/etc/proxynode/config.json`。不联网获取协议、检查凭据或报告安装信息，列表只输出节点 ID 和 API 地址。
+
+同一面板地址（忽略末尾 `/`）和 ID 不允许重复。删除时若同一 ID 对应多个面板，必须指定 `--api-host`；批量操作任一 ID 无效则全部不写入。配置原有 Log/Audit、未知字段和其他节点保持不变。修改采用文件锁、原子替换，保留上一次完整配置 `config.json.bak`，配置和备份权限为 0600；备份包含密钥，应按配置文件管理。
+
+命令不会主动操作系统服务；保存后执行 `restart` 确保新配置生效，不依赖文件监听自动重载。删除最后一个节点会留下空列表。旧版无参数安装留下的示例节点不会自动删除，应先用 `list-nodes` 确认并移除示例 ID。
+
+## 不包含原项目计数与广告
+
+原安装脚本曾请求 `api.v-50.me/counter`；自有安装脚本已不包含这项请求，也没有广告横幅、推广或捐赠菜单。自动化测试检查安装只请求本 fork 的安装包和校验文件，并检查本地节点管理不发起网络请求。许可、NOTICE 和源码归属保留。
+
+节点向配置的自有面板提交用户流量、在线状态和已开启的审计数据仍保留，不能将其与原项目的安装计数混为一谈。规则数据与互通测试客户端由 CI 下载，不是安装时的遥测。
 
 ## 迁移原 v2node
 

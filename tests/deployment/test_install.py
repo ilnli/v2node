@@ -48,7 +48,7 @@ shutil.copyfile(pathlib.Path(os.environ['FIXTURES']) / url.rsplit('/', 1)[-1], o
         files = {'proxynode': '#!/bin/sh\necho test-proxynode\n',
                  'proxynode-manager': '#!/bin/sh\nexit 0\n',
                  'install.sh': '#!/bin/sh\nexit 0\n',
-                 'config.example.json': json.dumps({'Audit': {'Enabled': True}, 'Nodes': []}),
+                 'config.example.json': json.dumps({'Audit': {'Enabled': True}, 'Nodes': [{'ApiHost': 'https://panel.example.com', 'NodeID': 1, 'ApiKey': 'replace-with-node-token'}]}),
                  'geoip.dat': 'synthetic geoip', 'geosite.dat': 'synthetic geosite'}
         with tarfile.open(self.fixture / name, 'w:gz') as archive:
             for filename, value in files.items():
@@ -75,6 +75,24 @@ shutil.copyfile(pathlib.Path(os.environ['FIXTURES']) / url.rsplit('/', 1)[-1], o
         self.assertFalse(config['Audit']['Enabled'])
         self.assertEqual(config['Nodes'][0]['ApiKey'], 'key"with\\characters')
         self.assertIn('https://github.com/ilnli/v2node/releases/latest/download/proxynode-linux-amd64.tar.gz', self.log.read_text())
+
+    def test_install_without_credentials_has_no_placeholder_node(self):
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        config = json.loads((self.prefix / 'etc/proxynode/config.json').read_text())
+        self.assertEqual(config['Nodes'], [])
+        self.assertIn('add-node', result.stdout)
+
+    def test_multiple_ids_and_no_upstream_reporting(self):
+        result = self.run_install('--api-host', 'https://panel.example', '--node-ids', '101,102',
+                                  '--node-id', '103', '--api-key', 'key')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        config = json.loads((self.prefix / 'etc/proxynode/config.json').read_text())
+        self.assertEqual([n['NodeID'] for n in config['Nodes']], [101, 102, 103])
+        self.assertEqual(self.log.read_text().splitlines(), [
+            'https://github.com/ilnli/v2node/releases/latest/download/proxynode-linux-amd64.tar.gz',
+            'https://github.com/ilnli/v2node/releases/latest/download/SHA256SUMS',
+        ])
 
     def test_update_preserves_config_and_audit_cache(self):
         config = self.prefix / 'etc/proxynode/config.json'

@@ -7,7 +7,8 @@ PREFIX=
 NO_SERVICE=false
 MIGRATE=false
 API_HOST=
-NODE_ID=
+NODE_IDS=()
+NODE_IDS_CSV=
 API_KEY=
 CONFIG_SOURCE=
 NEEDS_CONFIG=false
@@ -16,10 +17,11 @@ fail() { echo "错误: $*" >&2; exit 1; }
 usage() {
     cat <<'HELP'
 用法: install.sh [--version proxynode-vX.Y.Z] [--config FILE]
-                  [--api-host URL --node-id ID --api-key KEY]
+                  [--api-host URL --node-ids 101,102,103 --api-key KEY]
                   [--migrate-v2node] [--no-service] [--prefix DIR]
 只从 ilnli/v2node 的 GitHub Release 下载并校验二进制。
 默认保留已有 /etc/proxynode/config.json；迁移旧 v2node 必须显式指定。
+--node-id 可重复使用；已有配置请用 proxynode-manager add-node 追加节点。
 --prefix 必须配合 --no-service，可用于暂存安装而不修改系统服务。
 HELP
 }
@@ -97,13 +99,13 @@ UNIT
 main() {
     while (( $# )); do
         case "$1" in
-            --version|--prefix|--api-host|--node-id|--api-key|--config)
+            --version|--prefix|--api-host|--node-id|--node-ids|--api-key|--config)
                 [[ $# -ge 2 && -n $2 ]] || fail "$1 缺少参数"
                 case "$1" in
                     --version) VERSION=$2 ;;
                     --prefix) PREFIX=${2%/} ;;
                     --api-host) API_HOST=$2 ;;
-                    --node-id) NODE_ID=$2 ;;
+                    --node-id|--node-ids) NODE_IDS+=("$2") ;;
                     --api-key) API_KEY=$2 ;;
                     --config) CONFIG_SOURCE=$2 ;;
                 esac
@@ -128,8 +130,16 @@ main() {
     for tool in curl tar sha256sum python3 install; do
         command -v "$tool" >/dev/null || fail "缺少依赖: $tool"
     done
-    if [[ -n $API_HOST || -n $NODE_ID || -n $API_KEY ]]; then
-        [[ -n $API_HOST && $NODE_ID =~ ^[1-9][0-9]*$ && -n $API_KEY ]] || fail "需要完整的 api-host/node-id/api-key，节点 ID 必须为正整数"
+    if [[ -n $API_HOST || ${#NODE_IDS[@]} -gt 0 || -n $API_KEY ]]; then
+        [[ -n $API_HOST && ${#NODE_IDS[@]} -gt 0 && -n $API_KEY ]] || fail "需要完整的 api-host/node-id/api-key"
+        NODE_IDS_CSV=$(python3 - "${NODE_IDS[@]}" <<'PYIDS'
+import re, sys
+ids = [part.strip() for arg in sys.argv[1:] for part in arg.split(',')]
+if any(not re.fullmatch(r'[1-9][0-9]*', item) for item in ids) or len(set(ids)) != len(ids):
+    sys.exit('节点 ID 必须是互不重复的正整数')
+print(','.join(ids))
+PYIDS
+        ) || fail "无效节点列表"
         [[ -z $CONFIG_SOURCE ]] || fail "--config 与面板参数不能同时使用"
     fi
     set_paths
@@ -168,13 +178,14 @@ main() {
             cp -- "$PREFIX/etc/v2node/config.json" "$temp/new-config.json"
         else
             [[ -n $API_HOST ]] || NEEDS_CONFIG=true
-            python3 - "$temp/config.example.json" "$temp/new-config.json" "$API_HOST" "$NODE_ID" "$API_KEY" <<'PY'
+            python3 - "$temp/config.example.json" "$temp/new-config.json" "$API_HOST" "$NODE_IDS_CSV" "$API_KEY" <<'PY'
 import json, sys
 src, dst, host, node, key = sys.argv[1:]
 with open(src) as f: config = json.load(f)
 config.setdefault('Audit', {})['Enabled'] = False
+config['Nodes'] = []
 if host:
-    config['Nodes'] = [{'ApiHost': host, 'NodeID': int(node), 'ApiKey': key, 'Timeout': 15}]
+    config['Nodes'] = [{'ApiHost': host.rstrip('/'), 'NodeID': int(value), 'ApiKey': key, 'Timeout': 15} for value in node.split(',')]
 with open(dst, 'w') as f: json.dump(config, f, ensure_ascii=False, indent=2)
 PY
         fi
@@ -189,9 +200,12 @@ PY
     install -m 755 "$temp/install.sh" "$STATE_DIR/install.sh"
     install -m 644 "$temp/geoip.dat" "$temp/geosite.dat" "$CONFIG_DIR/"
     if [[ $NO_SERVICE == false ]]; then install_service "$manager"; fi
+    if [[ ! -f "$temp/new-config.json" && ${#NODE_IDS[@]} -gt 0 ]]; then
+        echo '已有配置已保留；如需添加节点，请执行 proxynode-manager add-node。'
+    fi
     echo "已从 $REPOSITORY 安装 $archive；配置: $CONFIG_DIR/config.json"
     if [[ $NEEDS_CONFIG == true ]]; then
-        echo "请填写面板配置后执行: proxynode-manager enable && proxynode-manager start"
+        echo "请先执行 proxynode-manager add-node 添加节点，再执行: proxynode-manager enable && proxynode-manager start"
     fi
     rm -rf -- "$temp"
     trap - EXIT
