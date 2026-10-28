@@ -19,7 +19,7 @@ Xray is the only kernel. Preserve AnyTLS/TUIC packages, license and upstream his
 - [x] Fork wyx2685/Xray-core to ilnli/Xray-core and merge official latest release, resolve only actual conflicts, retain extensions. Validate relevant changed core packages and compile proxynode against local checkout before publishing pin.
 - [x] Add reproducible real Mihomo VLESS integration matrix under tests/interop covering TCP/TLS/REALITY/Vision, WS/gRPC/HTTPUpgrade/XHTTP, Encryption and UDP/XUDP; verify payloads in both directions and record unsupported cases separately.
 - [x] Publish synchronized fork revision, pin go.mod/go.sum, align Go 1.27.3 build tooling; run proxynode tests/race/build and interoperability. Add CI gate before release.
-- [ ] Review new changes once, update comparison/verification docs, push fork and proxynode; publish new own release after passing gates.
+- [x] Review new changes once, update comparison/verification docs, push fork and proxynode; publish new own release after passing gates.
 
 ## Review Focus
 
@@ -35,3 +35,5 @@ Preserve fork-only protocols through upstream changes; Vision must transfer TLS 
 - Adapter gap found: add optional `tls_settings.alpn` mapping for XHTTP H3. `TestPanelTLSALPNReachesInbound/xhttp_h3` failed before mapping and passed after; unspecified ALPN remains unchanged.
 
 - Final local static-binary interoperability matrix passed 31/31; full Go/race tests, deployment tests and workflow checks passed. Independent final review found no actionable issues.
+
+- Pushed proxynode b50a310; main CI 40706627749 and release CI 40706725514 passed. proxynode-v0.2.0 published with both architectures and checksum manifest.

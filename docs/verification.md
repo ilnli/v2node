@@ -70,3 +70,10 @@ GO111MODULE=off go test -race -count=1 -v ./common/audit
 - 新增 ALPN 映射：`TestPanelTLSALPNReachesInbound` 验证面板 JSON 到内核的 H3 参数，以及未指定时保持默认；先复现缺失映射再通过修复。
 - 真实 Mihomo v1.19.33 对最终静态二进制：31/31 配置组合通过，含 TCP/TLS/REALITY、Vision、WS/early-data、HTTPUpgrade/fast-open、gRPC、XHTTP H1/H2/H3、三种 Encryption 模式和 XUDP；证书指纹及错误 UUID 拒绝检查通过。详情、校验值和未覆盖范围见 [互通文档](mihomo-interop.md)。
 - 独立审查未发现需要修复的问题。生产服务未部署，面板接收审计及订阅模板尚未修改；REALITY 客户端必须先启用混合密钥交换选项。
+
+### v0.2.0 远端发布
+
+- 发布提交：`b50a3100d1de42bcd92738433fc19f58c931f56d`。
+- [主分支 CI](https://github.com/ilnli/v2node/actions/runs/40706627749) 成功；[v0.2.0 Release CI](https://github.com/ilnli/v2node/actions/runs/40706725514) 的测试、真实 Mihomo 互通、amd64/arm64 构建和公开发布全部成功。
+- [proxynode-v0.2.0](https://github.com/ilnli/v2node/releases/tag/proxynode-v0.2.0) 已公开，包含两个架构安装包和 SHA256SUMS；发布说明明确列出 REALITY 客户端参数迁移要求。
+- 安装脚本从真实 v0.2.0 Release 下载并通过 SHA256 校验，在 `/tmp/proxynode-v020-install` 暂存安装后运行 `version` 成功；产物为 Go 1.27.3 / CGO_ENABLED=0，依赖固定的自有 Xray 提交；新配置 Audit.Enabled=false。未操作系统服务。
