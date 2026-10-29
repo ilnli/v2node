@@ -12,13 +12,17 @@
 
 默认下载 `releases/latest/download/...`；`--version proxynode-vX.Y.Z` 改为对应固定版本。不回退到 `wyx2685/v2node`。管理命令更新自身时也只请求本 fork 的安装脚本。
 
+## 面板托管
+
+推荐从 ProxyBoard 主机页生成一次性注册命令；之后通过面板完成节点、证书、网关和升级操作。旧节点转换、持久化路径及失败恢复见 [托管主机说明](managed-hosts.md)。以下保留独立模式用法。
+
 ## 安装与更新
 
 需要 Linux amd64/arm64、Bash、curl、tar、sha256sum、Python 3。系统服务支持 systemd 和 OpenRC。
 
 ```sh
 curl -fL https://raw.githubusercontent.com/ilnli/v2node/main/script/install.sh -o install.sh
-sudo bash install.sh --api-host https://panel.example.com --node-id 1 --api-key '节点密钥'
+sudo sh install.sh --api-host https://panel.example.com --node-id 1 --api-key '节点密钥'
 ```
 
 密钥也可预先写进仅 root 可读的配置文件，再使用 `--config /path/to/config.json`，避免密钥出现在命令参数中。
@@ -27,22 +31,23 @@ sudo bash install.sh --api-host https://panel.example.com --node-id 1 --api-key 
 
 | 内容 | 路径 |
 | --- | --- |
-| 节点程序 | `/usr/local/bin/proxynode` |
+| 节点程序 | `/usr/local/bin/proxynode`（指向当前安装包） |
 | 管理命令 | `/usr/local/bin/pnode`（指向 `proxynode-manager`，长命令仍兼容） |
 | 配置及 geoip/geosite | `/etc/proxynode/` |
 | 审计缓存 | `/var/lib/proxynode/audit/` |
+| 安装包与监督状态 | `/var/lib/proxynode/releases/`、`current`、升级结果文件 |
 | 服务名 | `proxynode` |
 
 已有配置原样保留，传入的新面板参数不会覆盖它。新建配置默认 `Audit.Enabled=false`；没有传配置或完整面板参数时生成空 `Nodes` 列表，不启动服务；执行 `pnode add` 添加后，再执行 `pnode enable` 和 `pnode start`。面板审计接口准备好后再开启审计。
 
 ```sh
 sudo pnode update
-sudo pnode update --version proxynode-v0.2.3
+sudo pnode update --version proxynode-v0.3.0
 sudo pnode restart
 sudo pnode log
 ```
 
-升级先下载并校验整个包，再替换二进制和资源，保留配置与审计缓存。校验失败不替换现有程序。脚本不安装系统依赖，也不自动修改防火墙。
+升级先下载并校验整个包，再替换二进制和资源，保留配置与审计缓存。校验失败不替换现有程序。缺少依赖时通过系统包管理器安装；不自动修改防火墙。
 
 ## 多节点添加、查看和删除
 
@@ -79,7 +84,7 @@ sudo pnode restart
 ## 迁移原 v2node
 
 ```sh
-sudo bash install.sh --migrate-v2node
+sudo sh install.sh --migrate-v2node
 ```
 
 发现旧配置但未指定迁移时会停止安装并提示。迁移会在新配置不存在时复制 `/etc/v2node/config.json`，安装新程序，然后停用旧 `v2node` 服务再启动 `proxynode`，防止端口冲突。旧二进制和配置不删除；新服务启动失败时可查看日志，必要时停止新服务并手动恢复旧服务。`script/v2node.sh` 是转发到新管理命令的兼容入口。
@@ -87,7 +92,7 @@ sudo bash install.sh --migrate-v2node
 ## 无服务安装与暂存验证
 
 ```sh
-bash install.sh --prefix /tmp/proxynode-staging --no-service --version proxynode-v0.2.3
+bash install.sh --prefix /tmp/proxynode-staging --no-service --version proxynode-v0.3.0
 ```
 
 此模式把所有文件安装到指定前缀下，不操作系统服务。可用于检查发布包；直接部署且自行管理进程时使用 `--no-service`。

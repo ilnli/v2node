@@ -15,21 +15,14 @@ func (c *Controller) reportUserTrafficTask(ctx context.Context) (err error) {
 		reportmin = c.info.Common.BaseConfig.NodeReportMinTraffic
 		devicemin = c.info.Common.BaseConfig.DeviceOnlineMinTraffic
 	}
-	userTraffic, _ := c.server.GetUserTrafficSlice(c.tag, reportmin)
-	if len(userTraffic) > 0 {
-		err = c.apiClient.ReportUserTraffic(ctx, userTraffic)
-		if err != nil {
-			log.WithFields(log.Fields{
-				"tag": c.tag,
-				"err": err,
-			}).Info("Report user traffic failed")
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return err
-			}
-		} else {
-			log.WithField("tag", c.tag).Infof("Report %d users traffic", len(userTraffic))
-			//log.WithField("tag", c.tag).Debugf("User traffic: %+v", userTraffic)
+	userTraffic, reportErr := c.flushTraffic(ctx, reportmin, false)
+	if reportErr != nil {
+		log.WithFields(log.Fields{"tag": c.tag, "err": reportErr}).Info("Report user traffic failed; pending managed traffic retained")
+		if errors.Is(reportErr, context.Canceled) || errors.Is(reportErr, context.DeadlineExceeded) {
+			return reportErr
 		}
+	} else if len(userTraffic) > 0 {
+		log.WithField("tag", c.tag).Infof("Report %d users traffic", len(userTraffic))
 	}
 
 	if onlineDevice, err := c.limiter.GetOnlineDevice(); err != nil {
@@ -72,6 +65,34 @@ func (c *Controller) reportUserTrafficTask(ctx context.Context) (err error) {
 	}
 
 	return nil
+}
+
+// Normal reporting drains outstanding immutable batches before resetting more
+// counters. Shutdown additionally persists the remaining below-threshold delta,
+// even when a previous batch is still awaiting acknowledgement.
+func (c *Controller) flushTraffic(ctx context.Context, minimum int, final bool) ([]panel.UserTraffic, error) {
+	send := func(ctx context.Context, traffic []panel.UserTraffic, id string) error {
+		return c.apiClient.ReportUserTraffic(ctx, traffic, id)
+	}
+	if c.trafficQueue != nil && !final {
+		if err := c.trafficQueue.Drain(ctx, send); err != nil {
+			return nil, err
+		}
+	}
+	traffic, err := c.server.GetUserTrafficSlice(c.tag, minimum)
+	if err != nil {
+		return nil, err
+	}
+	if c.trafficQueue != nil {
+		if err := c.trafficQueue.Append(traffic); err != nil {
+			return traffic, err
+		}
+		return traffic, c.trafficQueue.Drain(ctx, send)
+	}
+	if len(traffic) > 0 {
+		return traffic, c.apiClient.ReportUserTraffic(ctx, traffic)
+	}
+	return traffic, nil
 }
 
 func compareUserList(old, new []panel.UserInfo) (deleted, added, modified []panel.UserInfo) {

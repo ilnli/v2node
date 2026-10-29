@@ -2,8 +2,11 @@ package panel
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"encoding/json/jsontext"
@@ -52,7 +55,10 @@ func (c *Client) GetUserList(ctx context.Context) ([]UserInfo, error) {
 	if r.StatusCode() == 304 {
 		return nil, nil
 	}
-	userlist := &UserListBody{}
+	if r.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("user list HTTP status %d", r.StatusCode())
+	}
+	userlist := &UserListBody{Users: make([]UserInfo, 0)}
 	if strings.Contains(r.Header().Get("Content-Type"), "application/x-msgpack") {
 		decoder := msgpack.NewDecoder(r.RawResponse.Body)
 		if err := decoder.Decode(userlist); err != nil {
@@ -89,6 +95,9 @@ func (c *Client) GetUserList(ctx context.Context) ([]UserInfo, error) {
 		}
 	}
 	c.userEtag = r.Header().Get("ETag")
+	if userlist.Users == nil {
+		userlist.Users = make([]UserInfo, 0)
+	}
 	return userlist.Users, nil
 }
 
@@ -126,35 +135,57 @@ type UserTraffic struct {
 	Download int64
 }
 
-// ReportUserTraffic reports the user traffic
-func (c *Client) ReportUserTraffic(ctx context.Context, userTraffic []UserTraffic) error {
+// ReportUserTraffic reports a delta. A supplied durable batch ID requires an
+// explicit panel acknowledgement; retries always carry the same ID and payload.
+func (c *Client) ReportUserTraffic(ctx context.Context, userTraffic []UserTraffic, batchIDs ...string) error {
 	data := make(map[int][]int64, len(userTraffic))
-	for i := range userTraffic {
-		data[userTraffic[i].UID] = []int64{userTraffic[i].Upload, userTraffic[i].Download}
+	for _, traffic := range userTraffic {
+		data[traffic.UID] = []int64{traffic.Upload, traffic.Download}
 	}
-	const path = "/api/v1/server/UniProxy/push"
-	_, err := c.client.R().
-		SetContext(ctx).
-		SetBody(data).
-		ForceContentType("application/json").
-		Post(path)
+	batchID := ""
+	durable := len(batchIDs) > 0
+	if durable {
+		batchID = batchIDs[0]
+	}
+	if batchID == "" {
+		var token [16]byte
+		if _, err := rand.Read(token[:]); err != nil {
+			return err
+		}
+		batchID = hex.EncodeToString(token[:])
+	}
+	r, err := c.client.R().SetContext(ctx).SetHeader("X-Traffic-Batch-ID", batchID).
+		SetBody(data).ForceContentType("application/json").Post("/api/v1/server/UniProxy/push")
 	if err != nil {
 		return err
+	}
+	if r == nil || r.StatusCode() < 200 || r.StatusCode() >= 300 {
+		if r == nil {
+			return fmt.Errorf("traffic report received no response")
+		}
+		return fmt.Errorf("traffic report HTTP status %d", r.StatusCode())
+	}
+	if durable {
+		var acknowledgement struct {
+			Data bool `json:"data"`
+		}
+		if err := json.Unmarshal(r.Body(), &acknowledgement); err != nil || !acknowledgement.Data {
+			return fmt.Errorf("traffic report was not acknowledged by the panel")
+		}
 	}
 	return nil
 }
 
 func (c *Client) ReportNodeOnlineUsers(ctx context.Context, data *map[int][]string) error {
-	const path = "/api/v1/server/UniProxy/alive"
-	_, err := c.client.R().
-		SetContext(ctx).
-		SetBody(data).
-		ForceContentType("application/json").
-		Post(path)
-
+	r, err := c.client.R().SetContext(ctx).SetBody(data).ForceContentType("application/json").Post("/api/v1/server/UniProxy/alive")
 	if err != nil {
 		return err
 	}
-
+	if r == nil || r.StatusCode() < 200 || r.StatusCode() >= 300 {
+		if r == nil {
+			return fmt.Errorf("online report received no response")
+		}
+		return fmt.Errorf("online report HTTP status %d", r.StatusCode())
+	}
 	return nil
 }

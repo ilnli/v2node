@@ -37,6 +37,22 @@ class ManagerTests(unittest.TestCase):
                                '--config', str(self.config), *args], env=self.env,
                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
+    def test_managed_host_local_node_edits_are_refused(self):
+        self.config.write_text(json.dumps({'Agent': {'HostID': 7, 'ApiHost': 'https://panel.example',
+                                                  'EnrollmentToken': 'pn_enroll_private'}, 'Nodes': []}))
+        before = self.config.read_bytes()
+        for action, flags in [('add', ['102', '--api-host', 'https://panel.example', '--api-key', 'key']),
+                              ('del', ['102'])]:
+            result = self.run_manager(action, *flags)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('托管', result.stderr)
+            self.assertEqual(self.config.read_bytes(), before)
+        listing = self.run_manager('list')
+        self.assertEqual(listing.returncode, 0, listing.stderr)
+        self.assertIn('面板', listing.stdout)
+        self.assertNotIn('pn_enroll_private', listing.stdout)
+        self.assertFalse(Path(str(self.config) + '.bak').exists())
+
     def test_batch_add_list_remove_preserves_config_and_backup(self):
         before = self.config.read_bytes()
         key = 'secret"with\\characters'

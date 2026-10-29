@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	_ "net/http/pprof"
@@ -13,7 +15,9 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/wyx2685/v2node/conf"
 	"github.com/wyx2685/v2node/core"
+	"github.com/wyx2685/v2node/gateway"
 	"github.com/wyx2685/v2node/limiter"
+	"github.com/wyx2685/v2node/managed"
 	"github.com/wyx2685/v2node/node"
 )
 
@@ -78,6 +82,18 @@ func serverHandle(_ *cobra.Command, _ []string) {
 			}
 		}()
 	}
+	if c.Agent != nil {
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer cancel()
+		if err := managed.Run(ctx, c.Agent, version); err != nil {
+			if errors.Is(err, managed.ErrRestartSupervisor) {
+				os.Exit(75)
+			}
+			log.WithError(err).Error("Managed host stopped")
+			os.Exit(1)
+		}
+		return
+	}
 	//init limiter
 	limiter.Init()
 	//get node info
@@ -111,6 +127,18 @@ func serverHandle(_ *cobra.Command, _ []string) {
 		return
 	}
 	log.Info("Nodes started")
+	gateways, err := gateway.Start(c.Gateways)
+	if err != nil {
+		log.WithError(err).Error("Start managed gateway failed")
+		return
+	}
+	defer gateways.Close()
+	if c.ReadyFile != "" {
+		if err := managed.WriteReady(c.ReadyFile); err != nil {
+			log.WithError(err).Error("Write worker readiness failed")
+			return
+		}
+	}
 	if watch {
 		// On file change, just signal reload; do not run reload concurrently here
 		err = c.Watch(config, func() {

@@ -33,6 +33,7 @@ type Endpoint struct {
 	Target string
 	url    string
 	client *http.Client
+	bearer string
 }
 
 func NewEndpoint(base string, nodeID int, token string) (*Endpoint, error) {
@@ -46,9 +47,14 @@ func NewEndpoint(base string, nodeID int, token string) (*Endpoint, error) {
 	query := u.Query()
 	query.Set("node_type", "v2node")
 	query.Set("node_id", strconv.Itoa(nodeID))
-	query.Set("token", token)
+	bearer := ""
+	if strings.HasPrefix(token, "pn_host_") {
+		bearer = token
+	} else {
+		query.Set("token", token)
+	}
 	u.RawQuery = query.Encode()
-	return &Endpoint{Target: hex.EncodeToString(identity[:]), url: u.String(), client: reportClient}, nil
+	return &Endpoint{Target: hex.EncodeToString(identity[:]), url: u.String(), client: reportClient, bearer: bearer}, nil
 }
 
 // Send returns success only when the panel explicitly confirms every record in
@@ -67,6 +73,9 @@ func (e *Endpoint) Send(ctx context.Context, b Batch) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "proxynode-audit/1")
+	if e.bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+e.bearer)
+	}
 	resp, err := e.client.Do(req)
 	// net/http errors include request URLs (and therefore node tokens). Never wrap them.
 	if err != nil {

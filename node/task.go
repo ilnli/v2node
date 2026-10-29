@@ -50,7 +50,10 @@ func (c *Controller) startTasks(node *panel.NodeInfo) {
 
 func (c *Controller) nodeInfoMonitor(ctx context.Context) (err error) {
 	// get node info
-	newN, err := c.apiClient.GetNodeInfo(ctx)
+	var newN *panel.NodeInfo
+	if c.conf.ConfigFile == "" {
+		newN, err = c.apiClient.GetNodeInfo(ctx)
+	}
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return err
@@ -106,7 +109,7 @@ func (c *Controller) nodeInfoMonitor(ctx context.Context) (err error) {
 		c.limiter.AliveList = newA
 	}
 	// node no changed, check users
-	if len(newU) == 0 {
+	if newU == nil {
 		log.WithField("tag", c.tag).Debug("User list no change")
 		return nil
 	}

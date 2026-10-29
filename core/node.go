@@ -6,6 +6,12 @@ import (
 	panel "github.com/wyx2685/v2node/api/v2board"
 )
 
+// ValidateNode builds the configuration without binding any listener.
+func ValidateNode(info *panel.NodeInfo) error {
+	_, err := buildInbound(info, info.Tag)
+	return err
+}
+
 func (v *V2Core) AddNode(tag string, info *panel.NodeInfo) error {
 	inBoundConfig, err := buildInbound(info, tag)
 	if err != nil {

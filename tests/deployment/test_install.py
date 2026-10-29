@@ -48,6 +48,7 @@ shutil.copyfile(pathlib.Path(os.environ['FIXTURES']) / url.rsplit('/', 1)[-1], o
         files = {'proxynode': '#!/bin/sh\necho test-proxynode\n',
                  'proxynode-manager': '#!/bin/sh\nexit 0\n',
                  'install.sh': '#!/bin/sh\nexit 0\n',
+                 'supervise.sh': (ROOT / 'script/supervise.sh').read_text(),
                  'config.example.json': json.dumps({'Audit': {'Enabled': True}, 'Nodes': [{'ApiHost': 'https://panel.example.com', 'NodeID': 1, 'ApiKey': 'replace-with-node-token'}]}),
                  'geoip.dat': 'synthetic geoip', 'geosite.dat': 'synthetic geosite'}
         with tarfile.open(self.fixture / name, 'w:gz') as archive:
@@ -156,6 +157,91 @@ shutil.copyfile(pathlib.Path(os.environ['FIXTURES']) / url.rsplit('/', 1)[-1], o
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.prefix / 'etc/proxynode/config.json').read_bytes(), old.read_bytes())
 
+
+    def test_managed_enrollment_has_private_agent_config_and_guardian_bundle(self):
+        token = 'pn_enroll_' + 'a' * 40
+        result = self.run_install('--api-host', 'https://panel.example', '--host-id', '7',
+                                  '--enrollment-token', token)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        path = self.prefix / 'etc/proxynode/config.json'
+        config = json.loads(path.read_text())
+        self.assertEqual(config['Nodes'], [])
+        self.assertEqual(config['Agent']['HostID'], 7)
+        self.assertEqual(config['Agent']['EnrollmentToken'], token)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        current = self.prefix / 'var/lib/proxynode/current'
+        self.assertTrue(current.is_symlink())
+        self.assertTrue((current / 'supervise.sh').is_file())
+        self.assertEqual((self.prefix / 'usr/local/bin/proxynode').resolve(), current.resolve() / 'proxynode')
+        self.assertNotIn(token, result.stdout + result.stderr)
+
+    def test_managed_conversion_requires_explicit_choice_and_keeps_backup(self):
+        path = self.prefix / 'etc/proxynode/config.json'
+        path.parent.mkdir(parents=True)
+        original = '{"Nodes":[{"NodeID":9,"ApiKey":"old-secret"}]}'
+        path.write_text(original)
+        flags = ['--api-host', 'https://panel.example', '--host-id', '7', '--enrollment-token', 'pn_enroll_' + 'b' * 40]
+        result = self.run_install(*flags)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(path.read_text(), original)
+        result = self.run_install('--migrate-managed', *flags)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        backups = list(path.parent.glob('config.json.legacy-*'))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_text(), original)
+        self.assertEqual(json.loads(path.read_text())['Agent']['HostID'], 7)
+
+    def test_combined_old_v2node_and_managed_conversion_keeps_agent_config(self):
+        old = self.prefix / 'etc/v2node/config.json'
+        old.parent.mkdir(parents=True)
+        original = '{"Nodes":[{"NodeID":9,"ApiKey":"legacy-secret"}]}'
+        old.write_text(original)
+        result = self.run_install('--migrate-v2node', '--migrate-managed', '--api-host',
+                                  'https://panel.example', '--host-id', '8', '--enrollment-token',
+                                  'pn_enroll_' + 'c' * 40)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        config = json.loads((self.prefix / 'etc/proxynode/config.json').read_text())
+        self.assertEqual(config['Agent']['HostID'], 8)
+        self.assertEqual(config['Nodes'], [])
+        self.assertEqual(old.read_text(), original)
+        backup = next((self.prefix / 'etc/proxynode').glob('config.json.legacy-*'))
+        self.assertEqual(backup.read_text(), original)
+
+    def test_archive_link_is_rejected_before_existing_install_changes(self):
+        archive = self.fixture / 'proxynode-linux-amd64.tar.gz'
+        with tarfile.open(archive, 'w:gz') as out:
+            info = tarfile.TarInfo('proxynode')
+            info.type = tarfile.SYMTYPE
+            info.linkname = '/etc/passwd'
+            out.addfile(info)
+        self.checksums()
+        result = self.run_install()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.prefix / 'usr/local/bin/proxynode').exists())
+
+    def test_managed_installer_update_arms_startup_rollback(self):
+        state = self.prefix / 'var/lib/proxynode'
+        old, candidate = state / 'releases/old', state / 'releases/new'
+        old.mkdir(parents=True); candidate.mkdir()
+        (old / 'proxynode').write_text('old binary')
+        binary = candidate / 'proxynode'
+        binary.write_text('#!/bin/sh\necho "proxynode proxynode-v1.2.3 (fixture)"\n')
+        binary.chmod(0o755)
+        (state / 'current').symlink_to(old)
+        config = self.prefix / 'etc/proxynode/config.json'
+        config.parent.mkdir(parents=True)
+        config.write_text('{"Agent":{"HostID":7},"Nodes":[]}')
+        (state / 'upgrade-result.json').write_text('{"state":"failed"}')
+        result = subprocess.run(['bash', '-c',
+            'source "$1"; PREFIX="$2"; set_paths; NO_SERVICE=false; publish_bundle "$3"',
+            'test', str(ROOT / 'script/install.sh'), str(self.prefix), str(candidate)],
+            env=self.env, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        pending = json.loads((state / 'pending-upgrade.json').read_text())
+        self.assertEqual(pending['previous'], str(old))
+        self.assertEqual(pending['version'], 'proxynode-v1.2.3')
+        self.assertEqual((state / 'current').resolve(), candidate)
+        self.assertFalse((state / 'upgrade-result.json').exists())
 
     def test_migration_stops_old_service_before_starting_new(self):
         service_log = self.base / 'services'

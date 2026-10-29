@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -49,11 +50,17 @@ func New(c *conf.NodeConfig) (*Client, error) {
 	})
 	client.SetBaseURL(c.APIHost)
 	// set params
-	client.SetQueryParams(map[string]string{
+	params := map[string]string{
 		"node_type": "v2node",
 		"node_id":   strconv.Itoa(c.NodeID),
-		"token":     c.Key,
-	})
+	}
+	if strings.HasPrefix(c.Key, "pn_host_") {
+		client.SetHeader("Authorization", "Bearer "+c.Key)
+		client.SetRedirectPolicy(resty.NoRedirectPolicy())
+	} else {
+		params["token"] = c.Key
+	}
+	client.SetQueryParams(params)
 	return &Client{
 		client:   client,
 		Token:    c.Key,

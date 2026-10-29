@@ -14,6 +14,7 @@ usage() {
 节点命令支持 --api-host URL、--node-id ID、--node-ids IDS、--api-key KEY。
 --config FILE 可指定节点配置；原 proxynode-manager 命令及长子命令继续兼容。
 修改前校验并保留一份 config.json.bak；密钥交互输入不回显。
+托管主机的节点由面板分配；本地 add/del 不修改托管配置。
 HELP
 }
 
@@ -84,6 +85,11 @@ def load_config():
         raise ValueError('配置是符号链接，请通过 --config 指定实际文件')
     original = path.read_bytes()
     config = json.loads(original)
+    if isinstance(config, dict) and config.get('Agent'):
+        if action != 'list-nodes':
+            raise ValueError('当前为托管主机，请在面板中添加、绑定或删除节点；没有修改本地配置')
+        config.setdefault('Nodes', [])
+        return original, config
     if not isinstance(config, dict) or not isinstance(config.get('Nodes'), list):
         raise ValueError('配置必须包含 Nodes 数组')
     for node in config['Nodes']:
@@ -113,6 +119,9 @@ def atomic_write(target, data, owner):
 try:
     if action == 'list-nodes':
         _, config = load_config()
+        if config.get('Agent'):
+            print('当前为托管主机，请在面板的主机与节点管理中查看或调整分配。')
+            sys.exit(0)
         print('节点 ID\t面板 API 地址')
         for node in config['Nodes']:
             print(f"{node['NodeID']}\t{normalize_host(node['ApiHost'])}")

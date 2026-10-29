@@ -4,16 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	panel "github.com/wyx2685/v2node/api/v2board"
 	"github.com/wyx2685/v2node/common/task"
+	"github.com/wyx2685/v2node/common/trafficqueue"
 	"github.com/wyx2685/v2node/conf"
 	"github.com/wyx2685/v2node/core"
 	"github.com/wyx2685/v2node/limiter"
 )
 
 type Controller struct {
+	trafficQueue            *trafficqueue.Queue
+	started                 bool
 	server                  *core.V2Core
 	apiClient               *panel.Client
 	tag                     string
@@ -42,6 +46,12 @@ func (c *Controller) Start(x *core.V2Core) error {
 	// Init Core
 	c.server = x
 	var err error
+	if c.conf != nil && c.conf.TrafficDirectory != "" {
+		c.trafficQueue, err = trafficqueue.Open(c.conf.TrafficDirectory)
+		if err != nil {
+			return fmt.Errorf("open pending traffic: %w", err)
+		}
+	}
 	// First fetch Node Info
 	node := c.info
 	if node == nil {
@@ -55,9 +65,6 @@ func (c *Controller) Start(x *core.V2Core) error {
 	c.userList, err = c.apiClient.GetUserList(context.Background())
 	if err != nil {
 		return fmt.Errorf("get user list error: %s", err)
-	}
-	if len(c.userList) == 0 {
-		return errors.New("add users error: not have any user")
 	}
 	c.aliveMap, err = c.apiClient.GetUserAlive(context.Background())
 	if err != nil {
@@ -79,6 +86,7 @@ func (c *Controller) Start(x *core.V2Core) error {
 	if err != nil {
 		return fmt.Errorf("add new node error: %s", err)
 	}
+	c.started = true
 	added, err := c.server.AddUsers(&core.AddUsersParams{
 		Tag:      c.tag,
 		Users:    c.userList,
@@ -98,7 +106,6 @@ func (c *Controller) Close() error {
 	if c.server == nil || c.tag == "" {
 		return nil
 	}
-	limiter.DeleteLimiter(c.tag)
 	if c.nodeInfoMonitorPeriodic != nil {
 		c.nodeInfoMonitorPeriodic.Close()
 	}
@@ -108,9 +115,23 @@ func (c *Controller) Close() error {
 	if c.renewCertPeriodic != nil {
 		c.renewCertPeriodic.Close()
 	}
-	err := c.server.DelNode(c.tag)
-	if err != nil {
-		return fmt.Errorf("del node error: %s", err)
+	var result error
+	if c.started {
+		// Stop producers before extracting the final counters, while retaining the
+		// dispatcher/user map until the durable traffic snapshot has been written.
+		result = c.server.DelNode(c.tag)
+		c.server.StopNodeTraffic(c.tag)
+		if c.trafficQueue != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_, err := c.flushTraffic(ctx, 0, true)
+			cancel()
+			if err != nil {
+				result = errors.Join(result, fmt.Errorf("final traffic report: %w", err))
+			}
+		}
+		c.started = false
 	}
-	return nil
+	limiter.DeleteLimiter(c.tag)
+	c.tag = ""
+	return result
 }

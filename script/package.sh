@@ -16,11 +16,12 @@ mkdir -p "$output"
     -ldflags "-s -w -X github.com/wyx2685/v2node/cmd.version=$version" -o "$stage/proxynode" .)
 cp "$root/script/proxynode.sh" "$stage/proxynode-manager"
 cp "$root/script/install.sh" "$stage/install.sh"
+cp "$root/script/supervise.sh" "$stage/supervise.sh"
 cp "$root/examples/config.json" "$stage/config.example.json"
 cp "$root/LICENSE" "$root/NOTICE.md" "$root/README.md" "$stage/"
 cp "$geodata/geoip.dat" "$geodata/geosite.dat" "$geodata/GEODATA_SOURCE.txt" "$stage/"
-chmod 755 "$stage/proxynode" "$stage/proxynode-manager" "$stage/install.sh"
+chmod 755 "$stage/proxynode" "$stage/proxynode-manager" "$stage/install.sh" "$stage/supervise.sh"
 tar -czf "$output/proxynode-linux-$arch.tar.gz" -C "$stage" \
-    proxynode proxynode-manager install.sh config.example.json LICENSE NOTICE.md README.md \
+    proxynode proxynode-manager install.sh supervise.sh config.example.json LICENSE NOTICE.md README.md \
     geoip.dat geosite.dat GEODATA_SOURCE.txt
 (cd "$output" && sha256sum "proxynode-linux-$arch.tar.gz" > "proxynode-linux-$arch.tar.gz.sha256")

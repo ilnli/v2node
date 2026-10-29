@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 
 	log "github.com/sirupsen/logrus"
 	panel "github.com/wyx2685/v2node/api/v2board"
@@ -26,7 +27,16 @@ func New(nodes []conf.NodeConfig) (*Node, error) {
 		if err != nil {
 			return nil, err
 		}
-		info, err := p.GetNodeInfo(context.Background())
+		var info *panel.NodeInfo
+		if node.ConfigFile != "" {
+			var data []byte
+			data, err = os.ReadFile(node.ConfigFile)
+			if err == nil {
+				info, err = panel.ParseNodeInfo(data, node.NodeID, node.APIHost)
+			}
+		} else {
+			info, err = p.GetNodeInfo(context.Background())
+		}
 		if err != nil {
 			return nil, err
 		}

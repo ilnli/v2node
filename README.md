@@ -1,6 +1,6 @@
 # Proxynode
 
-基于本地 v2node 的独立节点项目，新增连接审计采集和有界缓存。兼容原有 V2Board / ProxyBoard 节点配置及协议；Go module 路径暂保留上游名称，二进制名为 `proxynode`。来源和许可证见 [NOTICE.md](NOTICE.md)。
+基于本地 v2node 的独立节点项目，提供连接审计、有界缓存及面板托管主机。兼容原有 V2Board / ProxyBoard 节点配置及协议；Go module 路径暂保留上游名称，二进制名为 `proxynode`。来源和许可证见 [NOTICE.md](NOTICE.md)。
 
 ## 审计行为
 
@@ -11,20 +11,24 @@
 - 磁盘缓存最多 1024 MiB；容量不足或入口队列满时丢弃**新到记录**，保留旧记录。日志输出丢弃计数。
 - 正常退出、配置重载会将未上报内存批次落盘，重启后恢复；强制杀进程或断电可能丢失尚未落盘的记录。
 
-## 安装与升级
+## 面板托管（推荐）
 
-官方发布位置：[ilnli/v2node Releases](https://github.com/ilnli/v2node/releases)。支持 Linux amd64 / arm64；需要 Bash、curl、tar、sha256sum 和 Python 3。
+使用已升级的 ProxyBoard，在「主机与证书」创建主机并执行生成的注册命令一次。随后从面板创建多协议节点、申请/上传证书、配置内置 HTTP 网关及远程升级，无需逐个登录节点修改配置。已有节点转换和支持边界见 [托管主机说明](docs/managed-hosts.md)。
+
+## 独立模式安装与升级
+
+官方发布位置：[ilnli/v2node Releases](https://github.com/ilnli/v2node/releases)。支持 Linux amd64 / arm64；安装器会补齐 Bash、curl、tar、sha256sum、Python 3 和 CA 证书。
 
 ```sh
 curl -fL https://raw.githubusercontent.com/ilnli/v2node/main/script/install.sh -o install.sh
-sudo bash install.sh --api-host https://panel.example.com --node-ids 101,102,103 --api-key '节点密钥'
+sudo sh install.sh --api-host https://panel.example.com --node-ids 101,102,103 --api-key '节点密钥'
 ```
 
-已有配置会原样保留；全新配置默认关闭审计，待面板接口可用后再开启。已有 v2node 使用 `sudo bash install.sh --migrate-v2node` 显式迁移配置和服务。也可用 `--config /path/to/config.json` 导入配置。
+已有配置会原样保留；全新配置默认关闭审计，待面板接口可用后再开启。已有 v2node 使用 `sudo sh install.sh --migrate-v2node` 显式迁移配置和服务。也可用 `--config /path/to/config.json` 导入配置。
 
 ```sh
 sudo pnode update
-sudo pnode update --version proxynode-v0.2.3
+sudo pnode update --version proxynode-v0.3.0
 pnode version
 sudo pnode status
 ```
@@ -60,7 +64,7 @@ GOEXPERIMENT=jsonv2 go build -trimpath -o build_assets/proxynode .
 
 先修改示例中的面板地址、节点 ID、密钥及缓存目录。默认配置路径为 `/etc/proxynode/config.json`。省略 `Audit` 或设置 `Enabled: false` 时不采集审计，继续兼容现有面板。
 
-**本阶段尚未改造面板。** 启用审计前，面板需实现 [审计接口](docs/audit-api.md)；接口缺失时，节点会重试、缓存，达到上限后丢弃新记录。
+ProxyBoard 已提供审计接收功能；其他面板启用前需实现 [审计接口](docs/audit-api.md)；接口缺失时，节点会重试、缓存，达到上限后丢弃新记录。
 
 Docker：`docker build -t proxynode .`。运行时挂载配置至 `/etc/proxynode/config.json`，并将 `/var/lib/proxynode/audit` 挂载到持久卷；另按实际协议映射节点端口。启用磁盘审计需要 Linux/macOS/BSD；其他平台仍可关闭审计使用节点。
 

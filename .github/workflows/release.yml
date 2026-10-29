@@ -28,8 +28,10 @@ jobs:
           go-version-file: go.mod
       - run: python3 -m unittest discover -s tests/deployment -v
       - run: go test ./...
-      - run: go test -race ./common/audit ./core/app/dispatcher
+      - run: go test -race ./common/audit ./common/task ./common/trafficqueue ./core ./core/app/dispatcher ./node ./managed ./gateway
       - run: CGO_ENABLED=0 go build -trimpath -o build_assets/proxynode .
+      - name: Verify managed lifecycle with real worker processes
+        run: python3 tests/interop/managed.py --proxynode "$PWD/build_assets/proxynode"
       - name: Verify real Mihomo VLESS interoperability
         run: PROXYNODE_BIN="$PWD/build_assets/proxynode" bash script/test-mihomo.sh --output "$RUNNER_TEMP/mihomo-interop"
       - uses: actions/upload-artifact@v6

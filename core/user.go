@@ -84,8 +84,8 @@ func (vc *V2Core) GetUserTrafficSlice(tag string, mintraffic int) ([]panel.UserT
 			up := traffic.UpCounter.Load()
 			down := traffic.DownCounter.Load()
 			if up+down > int64(mintraffic*1000) {
-				traffic.UpCounter.Store(0)
-				traffic.DownCounter.Store(0)
+				up = traffic.UpCounter.Swap(0)
+				down = traffic.DownCounter.Swap(0)
 				if vc.users.uidMap[email] == 0 {
 					c.Delete(email)
 					return true
@@ -104,6 +104,20 @@ func (vc *V2Core) GetUserTrafficSlice(tag string, mintraffic int) ([]panel.UserT
 		return trafficSlice, nil
 	}
 	return nil, nil
+}
+
+// StopNodeTraffic closes active links while preserving user IDs and counters
+// for the final report. Call after removing the inbound and joining its tasks.
+func (vc *V2Core) StopNodeTraffic(tag string) {
+	if vc.dispatcher == nil {
+		return
+	}
+	vc.dispatcher.LinkManagers.Range(func(key, value any) bool {
+		if strings.HasPrefix(key.(string), tag+"|") {
+			value.(*dispatcher.LinkManager).CloseAll()
+		}
+		return true
+	})
 }
 
 func (v *V2Core) AddUsers(p *AddUsersParams) (added int, err error) {

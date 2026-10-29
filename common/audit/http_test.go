@@ -5,9 +5,27 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+func TestManagedHostAuditKeyIsNotAQueryParameter(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer pn_host_test" || r.URL.Query().Has("token") {
+			t.Error("audit must use the scoped host bearer without putting it in the URL")
+		}
+		w.Write([]byte(`{"data":{"batch_id":"test-batch","accepted":1}}`))
+	}))
+	defer server.Close()
+	endpoint, err := NewEndpoint(server.URL, 3, "pn_host_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := endpoint.Send(context.Background(), sampleBatch("test-batch")); err != nil {
+		t.Fatal(err)
+	}
+}
 
 type transportFunc func(*http.Request) (*http.Response, error)
 

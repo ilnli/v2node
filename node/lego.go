@@ -5,25 +5,24 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"os"
-	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
-	"encoding/json"
-
+	"github.com/go-acme/lego/v4/certcrypto"
 	"github.com/go-acme/lego/v4/certificate"
 	"github.com/go-acme/lego/v4/challenge/http01"
+	"github.com/go-acme/lego/v4/lego"
 	"github.com/go-acme/lego/v4/providers/dns"
 	"github.com/go-acme/lego/v4/registration"
-
-	"github.com/go-acme/lego/v4/certcrypto"
-	"github.com/go-acme/lego/v4/lego"
 	panel "github.com/wyx2685/v2node/api/v2board"
-	"github.com/wyx2685/v2node/common/file"
 )
 
 type Lego struct {
@@ -31,138 +30,156 @@ type Lego struct {
 	config *panel.CertInfo
 }
 
+// NewLego has no network or environment side effects. The complete ACME
+// operation, including provider creation and cleanup, runs under one lock.
 func NewLego(config *panel.CertInfo) (*Lego, error) {
-	user, err := NewLegoUser(path.Join(path.Dir(config.CertFile),
-		"user",
-		fmt.Sprintf("user-%s.json", config.Email)),
-		config.Email)
-	if err != nil {
-		return nil, fmt.Errorf("create user error: %s", err)
+	if config == nil || config.CertDomain == "" {
+		return nil, fmt.Errorf("ACME certificate domain is required")
 	}
-	c := lego.NewConfig(user)
-	c.Certificate.KeyType = certcrypto.RSA2048
-	client, err := lego.NewClient(c)
-	if err != nil {
-		return nil, err
+	if config.CertMode != "http" && config.CertMode != "dns" {
+		return nil, fmt.Errorf("unsupported ACME mode: %s", config.CertMode)
 	}
-	l := Lego{
-		client: client,
-		config: config,
-	}
-	err = l.SetProvider()
-	if err != nil {
-		return nil, fmt.Errorf("set provider error: %s", err)
-	}
-	return &l, nil
+	copy := *config
+	copy.CertFile = certificatePath(config.CertFile, config)
+	copy.KeyFile = certificatePath(config.KeyFile, config)
+	return &Lego{config: &copy}, nil
 }
 
-func checkPath(p string) error {
-	if !file.IsExist(path.Dir(p)) {
-		err := os.MkdirAll(path.Dir(p), 0755)
-		if err != nil {
-			return fmt.Errorf("create dir error: %s", err)
-		}
-	}
-	return nil
+func checkPath(path string) error {
+	return os.MkdirAll(filepath.Dir(path), 0700)
 }
 
 func (l *Lego) SetProvider() error {
 	switch l.config.CertMode {
 	case "http":
-		err := l.client.Challenge.SetHTTP01Provider(http01.NewProviderServer("", "80"))
-		if err != nil {
-			return err
-		}
+		return l.client.Challenge.SetHTTP01Provider(http01.NewProviderServer("", "80"))
 	case "dns":
-		for k, v := range l.config.DNSEnv {
-			os.Setenv(k, v)
-		}
-		p, err := dns.NewDNSChallengeProviderByName(l.config.Provider)
+		provider, err := dns.NewDNSChallengeProviderByName(l.config.Provider)
 		if err != nil {
-			return fmt.Errorf("create dns challenge provider error: %s", err)
+			return fmt.Errorf("create DNS provider: %w", err)
 		}
-		err = l.client.Challenge.SetDNS01Provider(p)
-		if err != nil {
-			return fmt.Errorf("set dns provider error: %s", err)
-		}
+		return l.client.Challenge.SetDNS01Provider(provider)
+	default:
+		return fmt.Errorf("unsupported ACME mode: %s", l.config.CertMode)
 	}
-	return nil
 }
 
-func (l *Lego) CreateCert() (err error) {
-	request := certificate.ObtainRequest{
-		Domains: []string{l.config.CertDomain},
-		Bundle:  true,
-	}
-	certificates, err := l.client.Certificate.Obtain(request)
-	if err != nil {
-		return fmt.Errorf("obtain certificate error: %s", err)
-	}
-	err = l.writeCert(certificates)
-	if err != nil {
-		return fmt.Errorf("write certificate error: %s", err)
-	}
-	return nil
+func (l *Lego) CreateCert() error {
+	certificateMu.Lock()
+	defer certificateMu.Unlock()
+	return l.obtain()
 }
 
 func (l *Lego) RenewCert() error {
-	file, err := os.ReadFile(l.config.CertFile)
-	if err != nil {
-		return fmt.Errorf("read cert file error: %s", err)
-	}
-	if e, err := l.CheckCert(file); !e {
+	certificateMu.Lock()
+	defer certificateMu.Unlock()
+	current, err := readCertificate(l.config)
+	if err == nil && time.Until(current.NotAfter) > certificateRenewBefore {
 		return nil
-	} else if err != nil {
-		return fmt.Errorf("check cert error: %s", err)
 	}
-	res, err := l.client.Certificate.Renew(certificate.Resource{
-		Domain:      l.config.CertDomain,
-		Certificate: file,
-	}, true, false, "")
-	if err != nil {
-		return err
-	}
-	err = l.writeCert(res)
-	if err != nil {
-		return fmt.Errorf("write certificate error: %s", err)
-	}
-	return nil
+	return l.obtain()
 }
 
-func (l *Lego) CheckCert(file []byte) (bool, error) {
-	cert, err := certcrypto.ParsePEMCertificate(file)
+// obtain is called only with certificateMu held, because DNS providers may read
+// credentials lazily during Present/CleanUp, long after their constructors.
+func (l *Lego) obtain() error {
+	err := withDNSEnvironment(l.config.DNSEnv, func() error {
+		directory := l.config.ACMEDirectory
+		if directory == "" {
+			directory = lego.LEDirectoryProduction
+		}
+		accountID := sha256.Sum256([]byte(directory + "\x00" + l.config.Email))
+		accountDirectory := l.config.AccountDirectory
+		if accountDirectory == "" {
+			accountDirectory = filepath.Join(filepath.Dir(l.config.CertFile), "accounts")
+		}
+		accountPath := filepath.Join(accountDirectory, fmt.Sprintf("%x.json", accountID))
+		user, err := NewLegoUser(accountPath, l.config.Email)
+		if err != nil {
+			return fmt.Errorf("load ACME account: %w", err)
+		}
+		config := lego.NewConfig(user)
+		config.CADirURL = directory
+		config.Certificate.KeyType = certcrypto.RSA2048
+		config.HTTPClient.Timeout = 30 * time.Second
+		client, err := lego.NewClient(config)
+		if err != nil {
+			return fmt.Errorf("create ACME client: %w", err)
+		}
+		l.client = client
+		if err := l.SetProvider(); err != nil {
+			return err
+		}
+		if user.Registration == nil {
+			user.Registration, err = client.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: true})
+			if err != nil {
+				return fmt.Errorf("register ACME account: %w", err)
+			}
+			if err := user.Save(accountPath); err != nil {
+				return fmt.Errorf("save ACME account: %w", err)
+			}
+		}
+		resource, err := client.Certificate.Obtain(certificate.ObtainRequest{Domains: []string{l.config.CertDomain}, Bundle: true})
+		if err != nil {
+			return fmt.Errorf("obtain certificate: %w", err)
+		}
+		return l.writeCert(resource)
+	})
+	if err == nil {
+		return nil
+	}
+	// Provider errors can contain request parameters. Status reports must never
+	// echo supplied credentials back to the panel's general node-status UI.
+	message := err.Error()
+	for _, value := range l.config.DNSEnv {
+		if value != "" {
+			message = strings.ReplaceAll(message, value, "[redacted]")
+		}
+	}
+	return fmt.Errorf("ACME: %s", message)
+}
+
+func withDNSEnvironment(values map[string]string, run func() error) error {
+	type value struct {
+		text   string
+		exists bool
+	}
+	old := make(map[string]value, len(values))
+	defer func() {
+		for name, previous := range old {
+			if previous.exists {
+				_ = os.Setenv(name, previous.text)
+			} else {
+				_ = os.Unsetenv(name)
+			}
+		}
+	}()
+	for name, text := range values {
+		previous, exists := os.LookupEnv(name)
+		old[name] = value{previous, exists}
+		if err := os.Setenv(name, text); err != nil {
+			return fmt.Errorf("set DNS environment variable %q: %w", name, err)
+		}
+	}
+	return run()
+}
+
+func (l *Lego) CheckCert(data []byte) (bool, error) {
+	cert, err := certcrypto.ParsePEMCertificate(data)
 	if err != nil {
 		return false, err
 	}
-	notAfter := int(time.Until(cert.NotAfter).Hours() / 24.0)
-	if notAfter > 30 {
-		return false, nil
+	if err := cert.VerifyHostname(l.config.CertDomain); err != nil {
+		return true, nil
 	}
-	return true, nil
+	return time.Until(cert.NotAfter) <= certificateRenewBefore || time.Now().Before(cert.NotBefore), nil
 }
-func (l *Lego) parseParams(path string) string {
-	r := strings.NewReplacer("{domain}", l.config.CertDomain,
-		"{email}", l.config.Email)
-	return r.Replace(path)
-}
-func (l *Lego) writeCert(certificates *certificate.Resource) error {
-	err := checkPath(l.config.CertFile)
-	if err != nil {
-		return fmt.Errorf("check path error: %s", err)
+
+func (l *Lego) writeCert(resource *certificate.Resource) error {
+	if resource == nil {
+		return fmt.Errorf("ACME returned no certificate")
 	}
-	err = os.WriteFile(l.parseParams(l.config.CertFile), certificates.Certificate, 0644)
-	if err != nil {
-		return err
-	}
-	err = checkPath(l.config.KeyFile)
-	if err != nil {
-		return fmt.Errorf("check path error: %s", err)
-	}
-	err = os.WriteFile(l.parseParams(l.config.KeyFile), certificates.PrivateKey, 0644)
-	if err != nil {
-		return err
-	}
-	return nil
+	return publishCertificate(l.config, resource.Certificate, resource.PrivateKey)
 }
 
 type User struct {
@@ -172,110 +189,76 @@ type User struct {
 	KeyEncoded   string `json:"Key"`
 }
 
-func (u *User) GetEmail() string {
-	return u.Email
-}
-func (u *User) GetRegistration() *registration.Resource {
-	return u.Registration
-}
-func (u *User) GetPrivateKey() crypto.PrivateKey {
-	return u.key
-}
+func (u *User) GetEmail() string                        { return u.Email }
+func (u *User) GetRegistration() *registration.Resource { return u.Registration }
+func (u *User) GetPrivateKey() crypto.PrivateKey        { return u.key }
 
-func NewLegoUser(path string, email string) (*User, error) {
-	var user User
-	if file.IsExist(path) {
-		err := user.Load(path)
-		if err != nil {
-			return nil, err
-		}
+// NewLegoUser loads or durably creates an account key. Registration belongs to
+// the configured directory and is performed by obtain using the same client.
+func NewLegoUser(path, email string) (*User, error) {
+	user := &User{Email: email}
+	if err := user.Load(path); err == nil {
 		if user.Email != email {
-			user.Registration = nil
-			user.Email = email
-			err := registerUser(&user, path)
-			if err != nil {
-				return nil, err
-			}
+			return nil, fmt.Errorf("ACME account email does not match")
 		}
-	} else {
-		user.Email = email
-		err := registerUser(&user, path)
-		if err != nil {
-			return nil, err
-		}
+		return user, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
 	}
-	return &user, nil
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	user.key = key
+	if err := user.Save(path); err != nil {
+		return nil, err
+	}
+	return user, nil
 }
 
-func registerUser(user *User, path string) error {
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return fmt.Errorf("generate key error: %s", err)
-	}
-	user.key = privateKey
-	c := lego.NewConfig(user)
-	client, err := lego.NewClient(c)
-	if err != nil {
-		return fmt.Errorf("create lego client error: %s", err)
-	}
-	reg, err := client.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: true})
-	if err != nil {
-		return err
-	}
-	user.Registration = reg
-	err = user.Save(path)
-	if err != nil {
-		return fmt.Errorf("save user error: %s", err)
-	}
-	return nil
-}
-
-func EncodePrivate(privKey *ecdsa.PrivateKey) (string, error) {
-	encoded, err := x509.MarshalECPrivateKey(privKey)
+func EncodePrivate(key *ecdsa.PrivateKey) (string, error) {
+	encoded, err := x509.MarshalECPrivateKey(key)
 	if err != nil {
 		return "", err
 	}
-	pemEncoded := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: encoded})
-	return string(pemEncoded), nil
+	return string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: encoded})), nil
 }
+
 func (u *User) Save(path string) error {
-	err := checkPath(path)
-	if err != nil {
-		return fmt.Errorf("check path error: %s", err)
+	key, ok := u.key.(*ecdsa.PrivateKey)
+	if !ok {
+		return fmt.Errorf("unsupported ACME account key")
 	}
-	u.KeyEncoded, _ = EncodePrivate(u.key.(*ecdsa.PrivateKey))
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+	encoded, err := EncodePrivate(key)
 	if err != nil {
 		return err
 	}
-	err = json.NewEncoder(f).Encode(u)
+	copy := *u
+	copy.KeyEncoded = encoded
+	data, err := json.Marshal(&copy)
 	if err != nil {
-		return fmt.Errorf("marshal json error: %s", err)
+		return err
 	}
-	u.KeyEncoded = ""
-	return nil
+	return atomicPrivateFile(path, data)
 }
 
-func (u *User) DecodePrivate(pemEncodedPriv string) (*ecdsa.PrivateKey, error) {
-	blockPriv, _ := pem.Decode([]byte(pemEncodedPriv))
-	x509EncodedPriv := blockPriv.Bytes
-	privateKey, err := x509.ParseECPrivateKey(x509EncodedPriv)
-	return privateKey, err
+func (u *User) DecodePrivate(encoded string) (*ecdsa.PrivateKey, error) {
+	block, _ := pem.Decode([]byte(encoded))
+	if block == nil {
+		return nil, fmt.Errorf("invalid ACME account private key PEM")
+	}
+	return x509.ParseECPrivateKey(block.Bytes)
 }
 
 func (u *User) Load(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("open file error: %s", err)
+		return fmt.Errorf("read ACME account: %w", err)
 	}
-
-	err = json.Unmarshal(data, u)
-	if err != nil {
-		return fmt.Errorf("unmarshal json error: %s", err)
+	if err := json.Unmarshal(data, u); err != nil {
+		return fmt.Errorf("decode ACME account: %w", err)
 	}
 	u.key, err = u.DecodePrivate(u.KeyEncoded)
-	if err != nil {
-		return fmt.Errorf("decode private key error: %s", err)
-	}
-	return nil
+	u.KeyEncoded = ""
+	return err
 }

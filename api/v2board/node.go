@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -79,27 +78,32 @@ type BaseConfig struct {
 }
 
 type TlsSettings struct {
-	ALPN             []string `json:"alpn,omitempty"`
-	ServerName       string   `json:"server_name"`
-	ServerNames      []string `json:"server_names"`
-	Dest             string   `json:"dest"`
-	ServerPort       string   `json:"server_port"`
-	ShortId          string   `json:"short_id"`
-	ShortIds         []string `json:"short_ids"`
-	PrivateKey       string   `json:"private_key"`
-	Mldsa65Seed      string   `json:"mldsa65Seed"`
-	Xver             uint64   `json:"xver,string"`
-	CertMode         string   `json:"cert_mode"`
-	CertFile         string   `json:"cert_file"`
-	KeyFile          string   `json:"key_file"`
-	TlsCert          string   `json:"tls_cert"`
-	TlsKey           string   `json:"tls_key"`
-	Provider         string   `json:"provider"`
-	DNSEnv           string   `json:"dns_env"`
-	RejectUnknownSni string   `json:"reject_unknown_sni"`
+	Email            string            `json:"email"`
+	ACMEDirectory    string            `json:"acme_directory"`
+	DNSEnvMap        map[string]string `json:"dns_env_map"`
+	ALPN             []string          `json:"alpn,omitempty"`
+	ServerName       string            `json:"server_name"`
+	ServerNames      []string          `json:"server_names"`
+	Dest             string            `json:"dest"`
+	ServerPort       string            `json:"server_port"`
+	ShortId          string            `json:"short_id"`
+	ShortIds         []string          `json:"short_ids"`
+	PrivateKey       string            `json:"private_key"`
+	Mldsa65Seed      string            `json:"mldsa65Seed"`
+	Xver             uint64            `json:"xver,string"`
+	CertMode         string            `json:"cert_mode"`
+	CertFile         string            `json:"cert_file"`
+	KeyFile          string            `json:"key_file"`
+	TlsCert          string            `json:"tls_cert"`
+	TlsKey           string            `json:"tls_key"`
+	Provider         string            `json:"provider"`
+	DNSEnv           string            `json:"dns_env"`
+	RejectUnknownSni string            `json:"reject_unknown_sni"`
 }
 
 type CertInfo struct {
+	AccountDirectory string
+	ACMEDirectory    string
 	CertMode         string
 	CertFile         string
 	KeyFile          string
@@ -137,29 +141,31 @@ func (c *Client) GetNodeInfo(ctx context.Context) (node *NodeInfo, err error) {
 	if r.StatusCode() == 304 {
 		return nil, nil
 	}
+	if r.StatusCode() != 200 {
+		return nil, fmt.Errorf("node configuration HTTP status %d", r.StatusCode())
+	}
 	hash := sha256.Sum256(r.Body())
 	newBodyHash := hex.EncodeToString(hash[:])
 	if c.responseBodyHash == newBodyHash {
 		return nil, nil
 	}
+	node, err = ParseNodeInfo(r.Body(), c.NodeId, c.APIHost)
+	if err != nil {
+		return nil, err
+	}
 	c.responseBodyHash = newBodyHash
 	c.nodeEtag = r.Header().Get("ETag")
+	return node, nil
+}
 
-	if r != nil {
-		defer func() {
-			if r.RawBody() != nil {
-				r.RawBody().Close()
-			}
-		}()
-	} else {
-		return nil, fmt.Errorf("received nil response")
-	}
+// ParseNodeInfo is shared by legacy polling and an authenticated managed manifest.
+func ParseNodeInfo(data []byte, nodeID int, apiHost string) (node *NodeInfo, err error) {
 	node = &NodeInfo{
-		Id: c.NodeId,
+		Id: nodeID,
 	}
 	// parse protocol params
 	cm := &CommonNode{}
-	err = json.Unmarshal(r.Body(), cm)
+	err = json.Unmarshal(data, cm)
 	if err != nil {
 		return nil, fmt.Errorf("decode node params error: %s", err)
 	}
@@ -173,20 +179,21 @@ func (c *Client) GetNodeInfo(ctx context.Context) (node *NodeInfo, err error) {
 	default:
 		return nil, fmt.Errorf("unsupport protocol: %s", cm.Protocol)
 	}
-	node.Tag = fmt.Sprintf("[%s]-%s:%d", c.APIHost, node.Type, node.Id)
+	node.Tag = fmt.Sprintf("[%s]-%s:%d", apiHost, node.Type, node.Id)
 	cf := cm.TlsSettings.CertFile
 	kf := cm.TlsSettings.KeyFile
 	if cf == "" {
-		cf = filepath.Join("/etc/v2node/", cm.Protocol+strconv.Itoa(c.NodeId)+".cer")
+		cf = filepath.Join("/etc/v2node/", cm.Protocol+strconv.Itoa(nodeID)+".cer")
 	}
 	if kf == "" {
-		kf = filepath.Join("/etc/v2node/", cm.Protocol+strconv.Itoa(c.NodeId)+".key")
+		kf = filepath.Join("/etc/v2node/", cm.Protocol+strconv.Itoa(nodeID)+".key")
 	}
 	cm.CertInfo = &CertInfo{
 		CertMode:         cm.TlsSettings.CertMode,
 		CertFile:         cf,
 		KeyFile:          kf,
-		Email:            "node@v2board.com",
+		Email:            cm.TlsSettings.Email,
+		ACMEDirectory:    cm.TlsSettings.ACMEDirectory,
 		CertDomain:       cm.TlsSettings.PrimaryServerName(),
 		DNSEnv:           make(map[string]string),
 		Provider:         cm.TlsSettings.Provider,
@@ -201,9 +208,18 @@ func (c *Client) GetNodeInfo(ctx context.Context) (node *NodeInfo, err error) {
 			}
 		}
 	}
+	for key, value := range cm.TlsSettings.DNSEnvMap {
+		cm.CertInfo.DNSEnv[key] = value
+	}
 	if cm.CertInfo.CertMode == "remote" {
 		cm.CertInfo.TlsCert = cm.TlsSettings.TlsCert
 		cm.CertInfo.TlsKey = cm.TlsSettings.TlsKey
+	}
+	if cm.ServerPort < 1 || cm.ServerPort > 65535 {
+		return nil, fmt.Errorf("invalid node port")
+	}
+	if cm.BaseConfig == nil {
+		cm.BaseConfig = &BaseConfig{}
 	}
 	// set interval
 	node.PushInterval = intervalToTime(cm.BaseConfig.PushInterval)
@@ -215,17 +231,19 @@ func (c *Client) GetNodeInfo(ctx context.Context) (node *NodeInfo, err error) {
 }
 
 func intervalToTime(i interface{}) time.Duration {
-	switch reflect.TypeOf(i).Kind() {
-	case reflect.Int:
-		return time.Duration(i.(int)) * time.Second
-	case reflect.String:
-		i, _ := strconv.Atoi(i.(string))
-		return time.Duration(i) * time.Second
-	case reflect.Float64:
-		return time.Duration(i.(float64)) * time.Second
-	default:
-		return time.Duration(reflect.ValueOf(i).Int()) * time.Second
+	var seconds int
+	switch value := i.(type) {
+	case int:
+		seconds = value
+	case float64:
+		seconds = int(value)
+	case string:
+		seconds, _ = strconv.Atoi(value)
 	}
+	if seconds <= 0 || seconds > 86400 {
+		seconds = 60
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func (t TlsSettings) EffectiveServerNames() []string {
