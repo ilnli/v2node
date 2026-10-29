@@ -1,8 +1,16 @@
 # Xray-core 修改版对比与 Mihomo 升级约束
 
-## 2026-10-28 同步状态
+## 2026-10-29 同步状态
 
-现已建立 [ilnli/Xray-core](https://github.com/ilnli/Xray-core)，将官方 v26.10.21 合入 wyx2685 的历史，保留扩展。同步提交为 [`d84c11216aba`](https://github.com/ilnli/Xray-core/commit/d84c11216aba6397cc7e30b5cc3b1aacde59dd33)，proxynode 的 `replace` 固定到该提交；Go 构建版本改为 1.27.3。
+现行依赖已同步官方 [v26.10.29](https://github.com/XTLS/Xray-core/releases/tag/v26.10.29)，fork 合并提交为 [`3c160b27cb42`](https://github.com/ilnli/Xray-core/commit/3c160b27cb42435487f273c095b31271e812f47f)。`go.mod` 的 `replace` 固定到该提交，Go 工具链仍为 1.27.3。AnyTLS/TUIC、Shadowsocks 扩展和旧 fork 历史保留，非生成的 VLESS、Vision、REALITY、XHTTP 实现与官方版本一致。
+
+本次纳入 Freedom `blockDelay`、WebSocket 正常关闭、DNS 响应边界、入站模块初始化顺序及 Geodata 等修复，并包含上游 XDRIVE 更新。VLESS Encryption 仍可设置为 `none` 并使用 TLS/REALITY；Xray 出站对免传输加密的私网地址例外判断更严格。仅在回环受信网络执行的无 TLS 测试，不代表公网明文部署建议。
+
+合并冲突仅涉及 CI，保留自有 fork 的固定工具链及 Geodata 测试流程，未引入上游缓存等待作业和全仓生成代码格式重写。当前真实互通结果见 [Mihomo 互通说明](mihomo-interop.md)。
+
+## 2026-10-28 同步记录
+
+当日建立 [ilnli/Xray-core](https://github.com/ilnli/Xray-core)，将官方 v26.10.21 合入 wyx2685 的历史，保留扩展。同步提交为 [`d84c11216aba`](https://github.com/ilnli/Xray-core/commit/d84c11216aba6397cc7e30b5cc3b1aacde59dd33)，当时 proxynode 的 `replace` 固定到该提交；Go 构建版本改为 1.27.3。
 
 此次包含下文提到的 Go 1.27.3+ Vision 修复及 REALITY、gRPC、Mux 等上游更新。非生成的 VLESS、Vision、REALITY、XHTTP 代码与官方 v26.10.21 一致。自定义 dispatcher 同步上游新增的路由错误日志，保留审计和限速。真实互通范围与结果单独记录在 [Mihomo 互通说明](mihomo-interop.md)。
 

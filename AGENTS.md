@@ -3,7 +3,7 @@
 ## 内核与依赖约束
 
 - 本项目只使用 **XTLS/Xray-core** 作为代理内核。不要把 Xray、V2Ray、V2Fly 混为一谈，也不要替换成 V2Ray/V2Fly 或 sing-box 内核。
-- 当前通过 `go.mod` 的 `replace` 使用 `ilnli/Xray-core`（从 `wyx2685/Xray-core` fork，已同步官方 v26.10.21）。工具库依赖（例如 `v2fly/ss-bloomring`、`sagernet/sing`）不等于运行对应项目的内核。
+- 当前通过 `go.mod` 的 `replace` 使用 `ilnli/Xray-core`（从 `wyx2685/Xray-core` fork，已同步官方 v26.10.29）。工具库依赖（例如 `v2fly/ss-bloomring`、`sagernet/sing`）不等于运行对应项目的内核。
 - 不得直接删除 `replace`：当前代码使用 fork 新增的 AnyTLS/TUIC 包和配置类型。差异及依据见 `docs/xray-core-comparison.md`。
 - 用户已授权建立并维护自有 Xray fork；后续继续同步正式版及必要补丁。保留许可、上游来源和可追溯提交，避免无关重写。
 

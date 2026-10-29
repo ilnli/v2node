@@ -24,7 +24,7 @@ sudo bash install.sh --api-host https://panel.example.com --node-ids 101,102,103
 
 ```sh
 sudo pnode update
-sudo pnode update --version proxynode-v0.2.2
+sudo pnode update --version proxynode-v0.2.3
 pnode version
 sudo pnode status
 ```
@@ -50,7 +50,7 @@ sudo pnode restart
 
 ## 构建与运行
 
-当前构建使用 Go 1.27.3 与 `jsonv2`，依赖自有 [Xray-core fork](https://github.com/ilnli/Xray-core)，已同步官方 v26.10.21 并保留 AnyTLS/TUIC 扩展。升级 Go/Xray 前须执行 [Mihomo VLESS 互通测试](docs/mihomo-interop.md)：
+当前构建使用 Go 1.27.3 与 `jsonv2`，依赖自有 [Xray-core fork](https://github.com/ilnli/Xray-core)，已同步官方 v26.10.29 并保留 AnyTLS/TUIC 扩展。升级 Go/Xray 前须执行 [Mihomo VLESS 互通测试](docs/mihomo-interop.md)：
 
 ```sh
 GOEXPERIMENT=jsonv2 go build -trimpath -o build_assets/proxynode .

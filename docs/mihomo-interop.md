@@ -1,6 +1,6 @@
 # Mihomo → proxynode VLESS 互通门槛
 
-核验日期：2026-10-28。客户端固定为当日最新正式版 [Mihomo v1.19.33](https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.33)，服务端使用真实 proxynode 进程、Xray-core v26.10.21 加保留的 wyx2685 扩展、Go 1.27.3。Mihomo 是测试客户端，服务端没有更换为其他代理内核。
+核验日期：2026-10-29。客户端固定为当日最新正式版 [Mihomo v1.19.33](https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.33)，服务端使用真实 proxynode 进程、Xray-core v26.10.29 加保留的 wyx2685 扩展、Go 1.27.3。Mihomo 是测试客户端，服务端没有更换为其他代理内核。
 
 最终静态发布候选通过完整 **31/31** 项互通矩阵，包含所有 Vision direct-copy 断言、HTTP/3、证书指纹校验和错误 UUID 拒绝探针。结果只适用于下列显式配置及已声明的覆盖范围。
 
