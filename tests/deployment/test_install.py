@@ -21,9 +21,11 @@ class InstallerTests(unittest.TestCase):
         self.fixture.mkdir()
         self.bin = self.base / 'bin'
         self.bin.mkdir()
+        self.scratch = self.base / 'scratch'
+        self.scratch.mkdir()
         self.log = self.base / 'requests'
         self.env = dict(os.environ, PATH=str(self.bin) + ':' + os.environ['PATH'],
-                        FIXTURES=str(self.fixture), REQUEST_LOG=str(self.log))
+                        FIXTURES=str(self.fixture), REQUEST_LOG=str(self.log), TMPDIR=str(self.scratch))
         self.command('uname', '#!/bin/bash\nif [[ $1 == -s ]]; then echo Linux; else echo x86_64; fi\n')
         self.command('curl', '''#!/usr/bin/env python3
 import os, pathlib, shutil, sys
@@ -137,6 +139,69 @@ shutil.copyfile(pathlib.Path(os.environ['FIXTURES']) / url.rsplit('/', 1)[-1], o
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(binary.read_text(), 'old binary')
         self.assertFalse((self.prefix / 'etc/proxynode/config.json').exists())
+        self.assertEqual(list(self.scratch.iterdir()), [], result.stderr)
+
+    def test_failed_download_cleans_temporary_files(self):
+        self.command('curl', '''#!/bin/bash
+while [[ $1 != --output ]]; do shift; done
+printf partial > "$2"
+exit 23
+''')
+        result = self.run_install()
+        self.assertEqual(result.returncode, 23, result.stderr)
+        self.assertNotIn('unbound variable', result.stderr)
+        self.assertEqual(list(self.scratch.iterdir()), [])
+
+    def test_hangup_cleans_temporary_files(self):
+        self.command('curl', '''#!/bin/bash
+while [[ $1 != --output ]]; do shift; done
+printf partial > "$2"
+kill -HUP "$PPID"
+''')
+        result = self.run_install()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(list(self.scratch.iterdir()), [], result.stderr)
+
+    def test_failed_bundle_copy_removes_only_unpublished_bundle(self):
+        first = self.run_install()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        state = self.prefix / 'var/lib/proxynode'
+        current = (state / 'current').resolve()
+        config = self.prefix / 'etc/proxynode/config.json'
+        before = config.read_bytes()
+        self.command('install', '''#!/bin/bash
+target=${!#}
+if [[ $target == */releases/*/proxynode ]]; then
+    printf partial > "$target"
+    echo 'No space left on device' >&2
+    exit 28
+fi
+exec /usr/bin/install "$@"
+''')
+        result = self.run_install()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((state / 'current').resolve(), current)
+        self.assertEqual(config.read_bytes(), before)
+        self.assertEqual(list((state / 'releases').iterdir()), [current])
+        self.assertEqual(list(self.scratch.iterdir()), [])
+        (self.bin / 'install').unlink()
+        retried = self.run_install()
+        self.assertEqual(retried.returncode, 0, retried.stderr)
+        self.assertEqual(config.read_bytes(), before)
+
+    def test_cleanup_preserves_guardian_candidate(self):
+        state = self.prefix / 'var/lib/proxynode'
+        candidate = state / 'releases/candidate'
+        candidate.mkdir(parents=True)
+        (candidate / 'proxynode').write_text('candidate')
+        (state / 'pending-upgrade.json').write_text(json.dumps({'candidate': str(candidate)}))
+        result = subprocess.run([
+            'bash', '-c',
+            'source "$1"; PREFIX="$2"; set_paths; INSTALL_BUNDLE="$3"; cleanup_install',
+            'test', str(ROOT / 'script/install.sh'), str(self.prefix), str(candidate),
+        ], env=self.env, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((candidate / 'proxynode').is_file())
 
     def test_arm64_and_unknown_architecture(self):
         self.command('uname', '#!/bin/bash\nif [[ $1 == -s ]]; then echo Linux; else echo aarch64; fi\n')

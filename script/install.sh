@@ -30,6 +30,21 @@ CONFIG_SOURCE=
 NEEDS_CONFIG=false
 MANAGED=false
 CONVERT_CONFIG=false
+INSTALL_TEMP=
+INSTALL_BUNDLE=
+
+cleanup_install() {
+    local status=$?
+    trap - EXIT HUP INT TERM
+    # EXIT can run after main's local variables have gone out of scope.
+    if [[ -n $INSTALL_TEMP ]]; then rm -rf -- "$INSTALL_TEMP" || true; fi
+    # Never remove a published release or a candidate owned by the upgrade guardian.
+    if [[ -n $INSTALL_BUNDLE && ! -e "$STATE_DIR/pending-upgrade.json" &&
+          $(readlink -f "$STATE_DIR/current" 2>/dev/null) != "$INSTALL_BUNDLE" ]]; then
+        rm -rf -- "$INSTALL_BUNDLE" || true
+    fi
+    return "$status"
+}
 
 fail() { echo "错误: $*" >&2; exit 1; }
 usage() {
@@ -227,8 +242,12 @@ PYCURRENT
         else fail "未发现 systemd/OpenRC；可使用 --no-service 安装后手动运行"; fi
     fi
     local temp archive base expected
-    temp=$(mktemp -d)
-    trap 'rm -rf -- "$temp"' EXIT
+    INSTALL_TEMP=$(mktemp -d "${TMPDIR:-/tmp}/proxynode-install.XXXXXXXX")
+    temp=$INSTALL_TEMP
+    trap cleanup_install EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
     archive="proxynode-linux-$arch.tar.gz"
     base="https://github.com/$REPOSITORY/releases"
     if [[ $VERSION == latest ]]; then base+="/latest/download"; else base+="/download/$VERSION"; fi
@@ -278,7 +297,8 @@ PYCONFIG
     install -d "$BIN_DIR"
     install -d -m 700 "$CONFIG_DIR" "$STATE_DIR" "$STATE_DIR/audit" "$STATE_DIR/releases"
     local bundle
-    bundle=$(mktemp -d "$STATE_DIR/releases/$VERSION-XXXXXXXX")
+    INSTALL_BUNDLE=$(mktemp -d "$STATE_DIR/releases/$VERSION-XXXXXXXX")
+    bundle=$INSTALL_BUNDLE
     for file in proxynode proxynode-manager install.sh supervise.sh; do install -m 755 "$temp/$file" "$bundle/$file"; done
     for file in config.example.json geoip.dat geosite.dat; do install -m 644 "$temp/$file" "$bundle/$file"; done
     for file in LICENSE NOTICE.md README.md GEODATA_SOURCE.txt; do [[ ! -f "$temp/$file" ]] || install -m 644 "$temp/$file" "$bundle/$file"; done
@@ -298,7 +318,6 @@ PYCONFIG
     echo "已从 $REPOSITORY 安装 $archive；配置: $CONFIG_DIR/config.json"
     if [[ $NEEDS_CONFIG == true ]]; then echo '请先执行 pnode add 添加节点，再执行: pnode enable && pnode start'
     elif [[ $MANAGED == true ]]; then echo '托管模式已配置；主机接入后，请在面板分配节点和证书。'; fi
-    rm -rf -- "$temp"
-    trap - EXIT
+    cleanup_install
 }
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then main "$@"; fi

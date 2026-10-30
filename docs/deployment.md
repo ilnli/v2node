@@ -49,6 +49,14 @@ sudo pnode log
 
 升级先下载并校验整个包，再替换二进制和资源，保留配置与审计缓存。校验失败不替换现有程序。缺少依赖时通过系统包管理器安装；不自动修改防火墙。
 
+### 安装中断后重试
+
+重新下载最新的 `script/install.sh` 后，可重复执行同一安装命令；已有同一主机的配置、托管身份和审计缓存会保留。安装器在下载、校验、解压或复制失败，以及收到 HUP/INT/TERM 时清理本次临时目录和未发布的安装包，保留原始错误退出码。已发布或正在升级回滚保护中的安装包不会被清理。
+
+临时目录使用 `${TMPDIR:-/tmp}/proxynode-install.XXXXXXXX`。若出现 `No space left on device` 或 curl 写入失败，先用 `df -h /tmp /var/lib/proxynode` 和 `df -i /tmp /var/lib/proxynode` 检查空间与 inode。可在 root shell 中用 `TMPDIR=/var/tmp sh install.sh ...` 将下载与解压移到有足够空间的文件系统；发布目录所在磁盘也必须有空间。
+
+断电或 SIGKILL 无法触发清理。确认没有安装进程运行后，再检查并清理残留的 `proxynode-install.*` 目录。旧版脚本残留使用随机的 `/tmp/tmp.*` 名称，只删除确认属于此次安装的目录，不要清空整个 `/tmp`。不要删除 `/etc/proxynode`、`/var/lib/proxynode/managed` 或当前版本来释放空间，否则可能丢失身份、证书或待上报数据。
+
 ## 多节点添加、查看和删除
 
 终端输入 `pnode` 即可打开中文数字菜单。无终端时输出帮助，不等待输入。快捷命令是 `pnode add`、`pnode list`、`pnode del`、`pnode restart` 和 `pnode update`；例如 `pnode add 101,102` 会继续提示面板地址和密钥，`pnode del 102` 删除指定 ID。
