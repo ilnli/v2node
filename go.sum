@@ -1225,6 +1225,8 @@ github.com/iij/doapi v0.0.0-20190504054126-0bbf12d6d7df h1:MZf03xP9WdakyXhOWuAD5
 github.com/iij/doapi v0.0.0-20190504054126-0bbf12d6d7df/go.mod h1:QMZY7/J/KSQEhKWFeDesPjMj+wCHReeknARU3wqlyN4=
 github.com/ilnli/xray-core v0.0.0-20261029153447-3c160b27cb42 h1:+afpwAsF+oYAYgP06EPbMeXi36drRilDxybnWtTvPT8=
 github.com/ilnli/xray-core v0.0.0-20261029153447-3c160b27cb42/go.mod h1:eIjkD4nSsMPWhDOJ075Gsx5X9HLvXOZqoNjC38V4e+E=
+github.com/ilnli/xray-core v0.0.0-20261030172016-4155e282792c h1:yjsV/NepNvBwWfXHd5A6TVnl1RJ3bN+WFwK9B9drOOs=
+github.com/ilnli/xray-core v0.0.0-20261030172016-4155e282792c/go.mod h1:eIjkD4nSsMPWhDOJ075Gsx5X9HLvXOZqoNjC38V4e+E=
 github.com/inconshreveable/mousetrap v1.0.0/go.mod h1:PxqpIevigyE2G7u3NXJIT2ANytuPF1OarO4DADm73n8=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=

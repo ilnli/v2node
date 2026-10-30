@@ -284,7 +284,7 @@ func (d *DefaultDispatcher) Dispatch(ctx context.Context, destination net.Destin
 		ctx = session.ContextWithOutbounds(ctx, outbounds)
 	}
 	ob := outbounds[len(outbounds)-1]
-	auditTime := time.Now()
+
 	originalDestination := destination
 	ob.OriginalTarget = destination
 	ob.Target = destination
@@ -300,7 +300,7 @@ func (d *DefaultDispatcher) Dispatch(ctx context.Context, destination net.Destin
 	}
 	if !sniffingRequest.Enabled {
 		go func() {
-			d.recordAudit(ctx, originalDestination, "", auditTime)
+			ctx = d.withAudit(ctx, originalDestination, "")
 			d.routedDispatch(ctx, outbound, destination)
 		}()
 	} else {
@@ -333,7 +333,7 @@ func (d *DefaultDispatcher) Dispatch(ctx context.Context, destination net.Destin
 					ob.Target = destination
 				}
 			}
-			d.recordAudit(ctx, originalDestination, domain, auditTime)
+			ctx = d.withAudit(ctx, originalDestination, domain)
 			d.routedDispatch(ctx, outbound, destination)
 		}()
 	}
@@ -351,7 +351,7 @@ func (d *DefaultDispatcher) DispatchLink(ctx context.Context, destination net.De
 		ctx = session.ContextWithOutbounds(ctx, outbounds)
 	}
 	ob := outbounds[len(outbounds)-1]
-	auditTime := time.Now()
+
 	originalDestination := destination
 	ob.OriginalTarget = destination
 	ob.Target = destination
@@ -429,7 +429,7 @@ func (d *DefaultDispatcher) DispatchLink(ctx context.Context, destination net.De
 
 	sniffingRequest := content.SniffingRequest
 	if !sniffingRequest.Enabled {
-		d.recordAudit(ctx, originalDestination, "", auditTime)
+		ctx = d.withAudit(ctx, originalDestination, "")
 		d.routedDispatch(ctx, outbound, destination)
 	} else {
 		cReader := &cachedReader{
@@ -460,7 +460,7 @@ func (d *DefaultDispatcher) DispatchLink(ctx context.Context, destination net.De
 				ob.Target = destination
 			}
 		}
-		d.recordAudit(ctx, originalDestination, domain, auditTime)
+		ctx = d.withAudit(ctx, originalDestination, domain)
 		d.routedDispatch(ctx, outbound, destination)
 	}
 
@@ -524,6 +524,7 @@ func sniffer(ctx context.Context, cReader *cachedReader, metadataOnly bool, netw
 }
 
 func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.Link, destination net.Destination) {
+	defer finishAudit(ctx)
 	outbounds := session.OutboundsFromContext(ctx)
 	ob := outbounds[len(outbounds)-1]
 
@@ -596,5 +597,6 @@ func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.
 		log.Record(accessMessage)
 	}
 
+	ctx = auditOutbound(ctx, handler, destination)
 	handler.Dispatch(ctx, link)
 }

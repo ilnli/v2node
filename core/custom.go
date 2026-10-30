@@ -74,11 +74,30 @@ func GetCustomConfig(infos []*panel.NodeInfo) (*dns.Config, []*core.OutboundHand
 		"outboundTag": "dns_out",
 	})
 	coreRouterConfig := &coreConf.RouterConfig{
-		RuleList:       []json.RawMessage{dnsRule},
+		RuleList:       []json.RawMessage{},
 		DomainStrategy: &domainStrategy,
 	}
 
+	// Destination denies must run before DNS interception and forwarding rules.
+	// IPOnDemand resolves domain targets before an IP rule can be bypassed by a
+	// catch-all default outbound. No source-IP condition is introduced.
 	for _, info := range infos {
+		if ips := blockedIPs(info); len(ips) > 0 {
+			domainStrategy = "IPOnDemand"
+			raw, err := json.Marshal(map[string]interface{}{
+				"inboundTag": info.Tag, "ip": ips, "outboundTag": "block",
+				"ruleTag": "deny-ip/" + info.Tag,
+			})
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			coreRouterConfig.RuleList = append(coreRouterConfig.RuleList, raw)
+		}
+	}
+	coreRouterConfig.RuleList = append(coreRouterConfig.RuleList, dnsRule)
+
+	for _, info := range infos {
+		ips := blockedIPs(info)
 		if len(info.Common.Routes) == 0 {
 			continue
 		}
@@ -110,16 +129,8 @@ func GetCustomConfig(infos []*panel.NodeInfo) (*dns.Config, []*core.OutboundHand
 				}
 				coreRouterConfig.RuleList = append(coreRouterConfig.RuleList, rawRule)
 			case "block_ip":
-				rule := map[string]interface{}{
-					"inboundTag":  info.Tag,
-					"ip":          route.Match,
-					"outboundTag": "block",
-				}
-				rawRule, err := json.Marshal(rule)
-				if err != nil {
-					continue
-				}
-				coreRouterConfig.RuleList = append(coreRouterConfig.RuleList, rawRule)
+				// Already installed as a priority destination deny above.
+				continue
 			case "block_port":
 				rule := map[string]interface{}{
 					"inboundTag":  info.Tag,
@@ -151,6 +162,9 @@ func GetCustomConfig(infos []*panel.NodeInfo) (*dns.Config, []*core.OutboundHand
 				if err != nil {
 					continue
 				}
+				if err := guardDirectOutbound(outbound, info, ips); err != nil {
+					return nil, nil, nil, err
+				}
 				rule := map[string]interface{}{
 					"inboundTag":  info.Tag,
 					"domain":      route.Match,
@@ -177,6 +191,9 @@ func GetCustomConfig(infos []*panel.NodeInfo) (*dns.Config, []*core.OutboundHand
 				err := json.Unmarshal([]byte(*route.ActionValue), outbound)
 				if err != nil {
 					continue
+				}
+				if err := guardDirectOutbound(outbound, info, ips); err != nil {
+					return nil, nil, nil, err
 				}
 				rule := map[string]interface{}{
 					"inboundTag":  info.Tag,
@@ -205,6 +222,9 @@ func GetCustomConfig(infos []*panel.NodeInfo) (*dns.Config, []*core.OutboundHand
 				if err != nil {
 					continue
 				}
+				if err := guardDirectOutbound(outbound, info, ips); err != nil {
+					return nil, nil, nil, err
+				}
 				rule := map[string]interface{}{
 					"inboundTag":  info.Tag,
 					"network":     "tcp,udp",
@@ -226,6 +246,26 @@ func GetCustomConfig(infos []*panel.NodeInfo) (*dns.Config, []*core.OutboundHand
 			default:
 				continue
 			}
+		}
+		if len(ips) > 0 {
+			settings := json.RawMessage(`{"domainStrategy":"UseIPv4v6"}`)
+			outbound := &coreConf.OutboundDetourConfig{Tag: "Default", Protocol: "freedom", Settings: &settings}
+			if err := guardDirectOutbound(outbound, info, ips); err != nil {
+				return nil, nil, nil, err
+			}
+			outbound.Tag = "deny-ip-default/" + info.Tag
+			built, err := outbound.Build()
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			coreOutboundConfig = append(coreOutboundConfig, built)
+			raw, err := json.Marshal(map[string]interface{}{
+				"inboundTag": info.Tag, "network": "tcp,udp", "outboundTag": outbound.Tag,
+			})
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			coreRouterConfig.RuleList = append(coreRouterConfig.RuleList, raw)
 		}
 	}
 	DnsConfig, err := coreDnsConfig.Build()

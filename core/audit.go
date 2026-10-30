@@ -42,6 +42,10 @@ func (v *V2Core) startAudit(infos []*panel.NodeInfo) error {
 		return fmt.Errorf("start audit: %w", err)
 	}
 	v.audit = s
+	countries, err := loadAuditGeoIP()
+	if err != nil {
+		log.Warnf("audit GeoIP unavailable; destination countries will be unknown: %v", err)
+	}
 	// Installed once before node listeners/users are added. The maps stay immutable.
 	v.dispatcher.Audit = func(tag, email string, r audit.Record) {
 		node, ok := targets[tag]
@@ -57,6 +61,7 @@ func (v *V2Core) startAudit(infos []*panel.NodeInfo) error {
 		r.UserID = uid
 		r.NodeID = node.id
 		r.Protocol = node.protocol
+		r.CountryCode = countries.country(r.DestinationIP)
 		s.Record(node.key, r)
 	}
 	return nil

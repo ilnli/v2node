@@ -23,7 +23,10 @@
       "port": 443,
       "network": "tcp",
       "domain": "example.com",
-      "protocol": "vless"
+      "protocol": "vless",
+      "destination_ip": "203.0.113.8",
+      "country_code": "US",
+      "outcome": "allowed"
     }
   ]
 }
@@ -37,8 +40,13 @@
 - `destination`：客户端请求的原始 IP 或域名，不保证是最终出站解析的 IP。
 - `domain`：嗅探到的域名，或原始目标中的域名；未知时省略。不保证能穿透 ECH 等隐藏域名的机制。
 - `network`：`tcp` 或 `udp`；`protocol` 为节点协议，例如 `vmess`、`vless`、`trojan`。
+- `destination_ip`：实际出站观测到的目标 IP，IPv4 或 IPv6；出站失败时可能是尝试连接的 IP，不代表已经建立连接。未取得实际 IP（例如域名在路由阶段被阻断，或通过远端代理解析）时省略，不把 DNS 候选地址当成已经连接的 IP。
+- `country_code`：由节点本地 `geoip.dat` 对 `destination_ip` 查询得到的大写两字母国家代码；缺少目标 IP、资源不可用或没有匹配时省略，面板显示未知。不是用户来源国家。
+- `outcome`：`allowed` 表示 TCP 拨号成功或 UDP 数据报已发送，不代表应用层请求成功；`blocked` 表示被规则阻断；`failed` 表示出站失败；`unknown` 表示未观测到最终出站结果（例如代理链或 DNS 专用出口）。旧节点可省略这三个新字段，面板按未知显示；旧磁盘批次继续按原格式上报。
 
 单批最多 64 条，整个 JSON 最多 256 KiB。每批仅包含同一面板节点的记录。
+
+面板审计页默认隐藏 `cp.cloudflare.com` 连通性检测记录，可关闭此筛选查看。筛选在查询分页前执行，不影响节点上报、面板保存或未指定该筛选的 API 查询。
 
 ## 成功确认与幂等
 
