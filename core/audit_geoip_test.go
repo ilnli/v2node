@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/xtls/xray-core/common/geodata"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -75,5 +76,49 @@ func TestAuditGeoIPUnavailable(t *testing.T) {
 		if got := index.country("192.0.2.8"); got != "" {
 			t.Fatalf("unavailable GeoIP country=%q, want unknown", got)
 		}
+	}
+}
+
+func TestAuditGeoIPWireFields(t *testing.T) {
+	field := func(num protowire.Number, value []byte) []byte {
+		return protowire.AppendBytes(protowire.AppendTag(nil, num, protowire.BytesType), value)
+	}
+	cidr, err := proto.Marshal(&geodata.CIDR{Ip: []byte{192, 0, 2, 0}, Prefix: 24})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Protobuf fields need not be ordered. Unknown fields must not hide a
+	// later country code or reverse flag, and duplicate prefixes stay last-wins.
+	entry := append(field(2, cidr), field(1, []byte("CN"))...)
+	entry = append(entry, field(19, []byte("future metadata"))...)
+	entry = append(entry, field(1, []byte("US"))...)
+	data := append(field(9, []byte("future list field")), field(1, entry)...)
+	for _, tc := range []struct {
+		name    string
+		data    []byte
+		country string
+		wantErr bool
+	}{
+		{"reordered fields", data, "US", false},
+		{"last country wins", append(field(1, append(field(1, []byte("CN")), field(2, cidr)...)), data...), "US", false},
+		{"reverse flag at end", field(1, append(append([]byte{}, entry...), 0x18, 0x01)), "", false},
+		{"truncated entry", data[:len(data)-1], "", true},
+		{"malformed CIDR", field(1, append(field(1, []byte("CN")), field(2, []byte{0x0a, 0x04, 0xc0})...)), "", true},
+		{"malformed excluded CIDR", field(1, append(field(1, []byte("PRIVATE")), field(2, []byte{0x0a, 0x04, 0xc0})...)), "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("XRAY_LOCATION_ASSET", dir)
+			if err := os.WriteFile(filepath.Join(dir, "geoip.dat"), tc.data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			index, err := loadAuditGeoIP()
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("load error = %v, want error = %v", err, tc.wantErr)
+			}
+			if got := index.country("192.0.2.8"); got != tc.country {
+				t.Fatalf("country = %q, want %q", got, tc.country)
+			}
+		})
 	}
 }
