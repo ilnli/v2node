@@ -124,3 +124,27 @@ git push origin proxynode-v0.1.1
 使用 GitHub 自带 `GITHUB_TOKEN`，无需新建发布密钥。只有发布作业获得 `contents: write`；测试和构建只读。工作流限制发布目标为 `ilnli/v2node`。本次不发布容器镜像；Dockerfile 保留供自行构建。
 
 规则数据固定在 `script/download-geodata.sh` 指定的发布版本，由 CI 下载并校验后装入本 fork 的安装包。客户端部署不请求上游 v2node 的任何二进制。
+
+## 按节点阻止 CN 目标
+
+在面板路由管理中创建 IP 拦截规则（`action: block_ip`，`match: ["geoip:cn"]`），然后在需要保护的每个节点中勾选该规则并保存。只创建规则而没有在节点上选择，不会启用。未选择的节点保持原有访问范围。
+
+规则只匹配代理访问的**目的地址**，不会因用户来源 IP 属于 CN 而拒绝登录或连接。CN 范围由所带的 GeoIP 数据定义；不额外以 `.cn` 后缀或企业所属国家推断目标。路由阶段按需解析域名，IP 拦截优先于 DNS、转发和默认路由；直连出站另对最终 IP 执行检查，覆盖 IPv4/IPv6、TCP 和 UDP 后续目标。代理链的远端解析结果无法由本节点观测，规则不是宿主机全部进程的防火墙。
+
+启用此规则需要有效的 `geoip.dat`；缺少或损坏资源应修复后启动，不可依赖审计中“国家未知”的降级来绕过规则加载。审计 `country_code` 表示目标国家，`destination_ip`/国家未知与连接允许是不同概念，参见[审计运行说明](audit-operations.md)。
+
+### 自行构建 Docker 镜像
+
+Dockerfile 使用独立构建阶段调用现有 `script/download-geodata.sh`，按脚本固定的版本下载并校验数据。最终镜像包含 `/usr/local/share/xray/geoip.dat`、`geosite.dat`、`GEODATA_SOURCE.txt`，并设置 `XRAY_LOCATION_ASSET=/usr/local/share/xray`。构建需要能访问固定版资源；校验失败会终止构建。原生安装包仍使用 `/etc/proxynode/` 下的资源。
+
+挂载自定义资源时，应把 `XRAY_LOCATION_ASSET` 指向实际包含这两个 `.dat` 文件的目录，同时保留版本来源记录。审计缓存目录应独立持久化，不要与资源目录混用。
+
+在节点源码根目录构建，再用原 Compose 配置重建服务（保留原端口、配置挂载和数据卷）：
+
+```sh
+docker build -t proxynode:cn-audit .
+# 将现有节点 Compose 服务的 image 改为 proxynode:cn-audit 后执行：
+docker compose up -d --force-recreate
+```
+
+面板先升级数据库至 `0007_audit_connection_details` 并更新 API/前端，然后更新节点。要上报审计，在节点配置设置 `Audit.Enabled=true`，并将 `Audit.Directory`（例如 `/var/lib/proxynode/audit`）挂载到持久化卷；已有节点继续使用原面板地址、认证密钥和 Nodes 配置。CN 拦截是否启用由面板该节点选中的路由决定，与审计开关独立。

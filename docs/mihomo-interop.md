@@ -75,3 +75,7 @@ Xray 默认阻止私网目的地址。测试面板通过正式 `default_out` 配
 **Mihomo 的普通 UDP 请求在此版本默认使用 XUDP。** 不设置 `packet-encoding` 或配置 `xudp: false` 不会切换到原始 VLESS UDP；初始化代码会重新开启 XUDP。不能把另一次相同 XUDP 测试当作原始 UDP 覆盖。`packetaddr` 是另一种编码，本矩阵未测试。依据：[Mihomo VLESS 初始化代码](https://github.com/MetaCubeX/mihomo/blob/v1.19.33/adapter/outbound/vless.go)。
 
 尚未测试：IPv6、CDN/反代、独立 XHTTP 下载通道、Mux、REALITY ML-DSA、全部加密密钥/填充/传输排列。HTTP/3 + REALITY 在 Mihomo 中不支持，不纳入合法矩阵。失败是实际执行但未通过；不支持是双方参数/能力不允许；未测试是本矩阵未覆盖，三者必须区分。
+
+## 2026-10-30 审计补丁复验
+
+官方最新正式版核验仍为 v1.19.33（发布于 2026-10-21），下载资产 SHA256 不变。包含出站审计 hook 和 CN 目标规则的候选再次通过上述 31/31 项；额外的真实 TCP/UDP 测试验证拒绝后续 UDP 目标以及实际 IP/拒绝审计，PostgreSQL 和 MySQL 的真实 Mihomo → proxynode → 面板链路均通过。原覆盖限制仍适用。

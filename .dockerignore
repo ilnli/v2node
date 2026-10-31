@@ -1,0 +1,10 @@
+.git
+.github
+build_assets
+dist
+geodata
+audit-cache
+config.json
+*.batch
+*.batch.tmp
+__pycache__
