@@ -158,7 +158,9 @@ def main():
                     identity["revoked"] = True
                 wait_for(lambda: not listening(port), "revoked host retained its listener")
                 assert process.poll() is None, "management process exited after revocation"
-                assert not (directory / "state" / "last-good.json").exists(), "revoked configuration remains recoverable"
+                # The listener closes before worker shutdown and cache removal finish.
+                wait_for(lambda: not (directory / "state" / "last-good.json").exists(),
+                         "revoked configuration remains recoverable")
                 print("PASS real managed enrollment, create, invalid-update preservation, restart idempotency, remove, recreate, desired-endpoint outage recovery, revoke")
             except BaseException:
                 log.seek(0)
