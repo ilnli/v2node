@@ -1,5 +1,20 @@
 # Mihomo → proxynode VLESS 互通门槛
 
+## 2026-11-14 安全升级候选
+
+本分支更新到 Xray v26.11.9 fork，客户端固定最新正式版 Mihomo v1.19.34（2026-11-11 发布）。Linux amd64 压缩包 SHA256：`223fab877e5795ce780ba39902e5f0b1113c1256ae244a7160f1165e017e9ccc`。来源：[Mihomo Release](https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.34)。
+
+矩阵扩展为 38 项，新增裸 TCP Encryption+Vision、最低版本接受/拒绝、ML-DSA 服务端兼容、真实 Xray 客户端 ML-DSA 验签及错误验证公钥拒绝、XMUX 并发和独立下载端点。证书固定场景新增错误指纹拒绝。报告同时记录两个客户端与服务端的二进制 SHA256。脚本会构建与节点同一 fork 的 Xray 测试客户端，可用 `XRAY_BIN` 指定已有构建。
+
+**此处是候选验证范围，不是通过声明；执行结果以本分支 report.json / CI 为准。** 上一轮 31/31 历史结果不能替代本次升级门槛。
+
+- Mihomo v1.19.34 REALITY 仍上报 `1.8.2`，设置 `min_client_ver: 26.3.27` 会拒绝它，即使已启用 `support-x25519mlkem768: true`。最低版本默认保持上游未配置状态，管理员可显式启用。
+- Mihomo v1.19.34 没有 ML-DSA 验证选项；`mldsa65-compat` 只证明添加服务端签名不破坏兼容，验签正反例由真实 Xray 客户端执行。临时靶站证书大于 3500 字节；本地 OpenSSL 靶站不声明支持混合后量子密钥交换。
+- XMUX 验证并发双向传输；下载分离通过独立 TCP 转发端口返回同一 XHTTP session hub，并断言该端口实际承载数据。它不等于外部 CDN 或生产网关验证。
+- 回落限速默认关闭；[官方文档](https://xtls.github.io/config/transport.html#realityobject)指出它自身会形成特征。仅在确需限制盗用时按目标特点配置，避免所有节点统一固定值。
+
+## 历史发布基线
+
 核验日期：2026-10-29。客户端固定为当日最新正式版 [Mihomo v1.19.33](https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.33)，服务端使用真实 proxynode 进程、Xray-core v26.10.29 加保留的 wyx2685 扩展、Go 1.27.3。Mihomo 是测试客户端，服务端没有更换为其他代理内核。
 
 最终静态发布候选通过完整 **31/31** 项互通矩阵，包含所有 Vision direct-copy 断言、HTTP/3、证书指纹校验和错误 UUID 拒绝探针。结果只适用于下列显式配置及已声明的覆盖范围。

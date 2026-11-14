@@ -16,8 +16,39 @@ import (
 	"github.com/xtls/xray-core/features/dns"
 	routingSession "github.com/xtls/xray-core/features/routing/session"
 	"github.com/xtls/xray-core/proxy/freedom"
+	"github.com/xtls/xray-core/transport/internet"
 	"google.golang.org/protobuf/proto"
 )
+
+func TestDefaultFreedomMatchesDNSAddressFamily(t *testing.T) {
+	dnsConfig, outbounds, _, err := GetCustomConfig([]*panel.NodeInfo{{Tag: "guarded", Common: &panel.CommonNode{
+		Routes: []panel.Route{{Action: "block_ip", Match: []string{"192.0.2.0/24"}}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := internet.DomainStrategy_USE_IP46
+	if dnsConfig.QueryStrategy.String() == "USE_IP4" {
+		want = internet.DomainStrategy_USE_IP4
+	}
+	checked := 0
+	for _, outbound := range outbounds {
+		if outbound.Tag != "Default" && outbound.Tag != "deny-ip-default/guarded" {
+			continue
+		}
+		settings, err := outbound.ProxySettings.GetInstance()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if settings.(*freedom.Config).DomainStrategy != want {
+			t.Errorf("outbound %s: strategy %v, DNS requires %v", outbound.Tag, settings.(*freedom.Config).DomainStrategy, want)
+		}
+		checked++
+	}
+	if checked != 2 {
+		t.Fatalf("checked %d defaults", checked)
+	}
+}
 
 // Documentation-only address ranges stand in for CN; no public services are contacted.
 func syntheticCN(t *testing.T) {

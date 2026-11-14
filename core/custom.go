@@ -71,7 +71,7 @@ func GetCustomConfig(infos []*panel.NodeInfo) (*dns.Config, []*core.OutboundHand
 		QueryStrategy: queryStrategy,
 	}
 	//outbound
-	defaultoutbound, _ := buildDefaultOutbound()
+	defaultoutbound, _ := buildDefaultOutbound(queryStrategy)
 	coreOutboundConfig := append([]*core.OutboundHandlerConfig{}, defaultoutbound)
 	block, _ := buildBlockOutbound()
 	coreOutboundConfig = append(coreOutboundConfig, block)
@@ -266,7 +266,7 @@ func GetCustomConfig(infos []*panel.NodeInfo) (*dns.Config, []*core.OutboundHand
 			}
 		}
 		if len(ips) > 0 {
-			settings := json.RawMessage(`{"domainStrategy":"UseIPv4v6"}`)
+			settings := json.RawMessage(fmt.Sprintf(`{"domainStrategy":%q}`, queryStrategy))
 			outbound := &coreConf.OutboundDetourConfig{Tag: "Default", Protocol: "freedom", Settings: &settings}
 			if err := guardDirectOutbound(outbound, info, ips); err != nil {
 				return nil, nil, nil, err

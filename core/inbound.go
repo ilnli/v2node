@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	stdnet "net"
 	"strconv"
 	"strings"
 	"time"
@@ -169,23 +170,29 @@ func buildInbound(nodeInfo *panel.NodeInfo, tag string) (*core.InboundHandlerCon
 		if dest == "" {
 			dest = v.TlsSettings.PrimaryServerName()
 		}
+		if _, _, err := stdnet.SplitHostPort(dest); err != nil && !strings.HasPrefix(dest, "/") && !strings.HasPrefix(dest, "@") {
+			port := v.TlsSettings.ServerPort
+			if port == "" {
+				port = "443"
+			}
+			dest = stdnet.JoinHostPort(strings.Trim(dest, "[]"), port)
+		}
 		xver := v.TlsSettings.Xver
-		d, err := json.Marshal(fmt.Sprintf(
-			"%s:%s",
-			dest,
-			v.TlsSettings.ServerPort))
+		d, err := json.Marshal(dest)
 		if err != nil {
 			return nil, fmt.Errorf("marshal reality dest error: %s", err)
 		}
 		in.StreamSetting.REALITYSettings = &coreConf.REALITYConfig{
-			Dest:         d,
-			Xver:         xver,
-			Show:         false,
-			ServerNames:  serverNames,
-			PrivateKey:   v.TlsSettings.PrivateKey,
-			MinClientVer: "0.0.1",
-			ShortIds:     shortIds,
-			Mldsa65Seed:  v.TlsSettings.Mldsa65Seed,
+			Dest:                  d,
+			Xver:                  xver,
+			Show:                  false,
+			ServerNames:           serverNames,
+			PrivateKey:            v.TlsSettings.PrivateKey,
+			MinClientVer:          v.TlsSettings.MinClientVer,
+			ShortIds:              shortIds,
+			Mldsa65Seed:           v.TlsSettings.Mldsa65Seed,
+			LimitFallbackUpload:   coreConf.LimitFallback(v.TlsSettings.LimitFallbackUpload),
+			LimitFallbackDownload: coreConf.LimitFallback(v.TlsSettings.LimitFallbackDownload),
 		}
 	default:
 		break
@@ -211,7 +218,11 @@ func buildVLess(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig)
 			if encSettings.ServerPadding != "" {
 				parts = append(parts, encSettings.ServerPadding)
 			}
-			parts = append(parts, encSettings.PrivateKey)
+			if len(encSettings.PrivateKeys) > 0 {
+				parts = append(parts, encSettings.PrivateKeys...)
+			} else {
+				parts = append(parts, encSettings.PrivateKey)
+			}
 			decryption = strings.Join(parts, ".")
 		default:
 			return fmt.Errorf("vless decryption method %s is not support", nodeInfo.Common.Encryption)

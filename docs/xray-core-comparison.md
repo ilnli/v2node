@@ -84,3 +84,9 @@ proxynode 的 `core/distro/all/all.go` 无条件导入 fork 的 AnyTLS/TUIC 包�
 “各种配置”指双方实际支持、参数匹配且组合合法的配置，不是任意字段的笛卡尔积。例如 Mihomo 的 TCP HTTP 伪装要映射到 Xray TCP header；旧的独立 H2 transport 与 XHTTP 的 H2 不是同一协议，当前官方基点已移除前者，不能仅重命名为 XHTTP 宣称兼容。
 
 升级前需要真实 Mihomo → 真实 proxynode → 本地测试目标的可重复连接和双向数据测试，并对比升级前后结果。失败、未测、不支持分别记录；配置解析、启动、`version` 输出、普通 CI 通过都不能代替协议互通。当前 CI 尚未覆盖这份完整矩阵，第一次相关升级必须先补齐所需测试；本文件不宣称全部组合已通过。
+
+## 2026-11-14 安全同步
+
+本分支合并官方 v26.11.9，fork 固定提交 `34846a645f348f69bea579ffc4daf47399c281e3`，保留 AnyTLS、TUIC、Go 1.27 Vision 兼容及 egress audit hook。上游 v26.10.31 对 MPTCP listener 显式默认关闭，随后 v26.11.9 更新 Chrome 指纹。它减少应用监听攻击面，不能替代 Linux 内核安全更新；本次未修改宿主机或部署。
+
+来源：[v26.10.31 安全说明](https://github.com/XTLS/Xray-core/releases/tag/v26.10.31)、[v26.11.9](https://github.com/XTLS/Xray-core/releases/tag/v26.11.9)。内核 fork CI 已通过；节点完整升级门槛见 [Mihomo 互通](mihomo-interop.md) 的当前候选记录，历史通过结果不作本次证据。

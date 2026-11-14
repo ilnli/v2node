@@ -2,8 +2,8 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-version=v1.19.33
-sha256=132f6f3edf9a65e62f04853aed3358472e0b2b7666daa8419edfa2ddf5bb6323
+version=v1.19.34
+sha256=223fab877e5795ce780ba39902e5f0b1113c1256ae244a7160f1165e017e9ccc
 if [[ $(uname -s) != Linux || $(uname -m) != x86_64 ]]; then
   echo 'The pinned interoperability client is Linux amd64 only.' >&2
   exit 1
@@ -30,4 +30,10 @@ if [[ -z $binary ]]; then
   binary="$build_dir/proxynode"
   (cd "$repo" && GOEXPERIMENT=jsonv2 go build -o "$binary" .)
 fi
-python3 "$repo/tests/interop/mihomo.py" --proxynode "$binary" --mihomo "$client" "$@"
+xray=${XRAY_BIN:-}
+if [[ -z $xray ]]; then
+  [[ -n $build_dir ]] || build_dir=$(mktemp -d)
+  xray="$build_dir/xray"
+  (cd "$repo" && GOEXPERIMENT=jsonv2 go build -o "$xray" github.com/xtls/xray-core/main)
+fi
+python3 "$repo/tests/interop/mihomo.py" --proxynode "$binary" --mihomo "$client" --xray "$xray" "$@"
