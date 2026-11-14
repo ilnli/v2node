@@ -461,7 +461,7 @@ def run_case(case, args, root, creds, plain_port, tls_port, udp_port):
         mihomo["proxies"][0]["xhttp-opts"]["download-settings"] = {
             "server": HOST, "port": download_port, "path": "/interop", "tls": True,
             "alpn": ["h2"], "servername": "synthetic-camouflage-000.example.test",
-            "skip-cert-verify": False, "fingerprint": creds["fingerprint"], "reality-opts": {}}
+            "skip-cert-verify": False, "fingerprint": creds["fingerprint"], "reality-opts": {"public-key": ""}}
     if case["variant"] == "download":
         relay = socketserver.ThreadingTCPServer((HOST, 0), DownloadRelay)
         relay.daemon_threads = True
