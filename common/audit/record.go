@@ -6,15 +6,17 @@ import (
 	"encoding/hex"
 	"net/netip"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
-	MaxBatchBytes            = 256 << 10
-	MaxRecords               = 64
-	MaxEntries               = 65536
-	DefaultMemoryBytes int64 = 64 << 20
-	MaxMemoryBytes     int64 = 128 << 20 // Remaining 128 MiB reserved for ingestion, metadata and working buffers.
-	MaxDiskBytes       int64 = 1 << 30
+	MaxBatchBytes             = 256 << 10
+	MaxRecords                = 64
+	MaxBlockReasonBytes       = 512
+	MaxEntries                = 65536
+	DefaultMemoryBytes  int64 = 64 << 20
+	MaxMemoryBytes      int64 = 128 << 20 // Remaining 128 MiB reserved for ingestion, metadata and working buffers.
+	MaxDiskBytes        int64 = 1 << 30
 )
 
 type Record struct {
@@ -29,6 +31,7 @@ type Record struct {
 	DestinationIP string `json:"destination_ip,omitempty"`
 	CountryCode   string `json:"country_code,omitempty"`
 	Outcome       string `json:"outcome,omitempty"`
+	BlockReason   string `json:"block_reason,omitempty"`
 }
 
 // Clone rejects oversize input before copying so packet buffers cannot be retained.
@@ -46,6 +49,9 @@ func (r Record) Clone() (Record, bool) {
 	if r.CountryCode != "" && (len(r.CountryCode) != 2 || r.CountryCode[0] < 'A' || r.CountryCode[0] > 'Z' || r.CountryCode[1] < 'A' || r.CountryCode[1] > 'Z') {
 		return Record{}, false
 	}
+	if len(r.BlockReason) > MaxBlockReasonBytes || !utf8.ValidString(r.BlockReason) {
+		return Record{}, false
+	}
 	switch r.Outcome {
 	case "", "allowed", "blocked", "failed", "unknown":
 	default:
@@ -53,6 +59,7 @@ func (r Record) Clone() (Record, bool) {
 	}
 	r.CountryCode = strings.Clone(r.CountryCode)
 	r.Outcome = strings.Clone(r.Outcome)
+	r.BlockReason = strings.Clone(r.BlockReason)
 	r.Destination = strings.Clone(r.Destination)
 	r.Domain = strings.Clone(r.Domain)
 	r.Protocol = strings.Clone(r.Protocol)

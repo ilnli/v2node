@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,7 +83,7 @@ func TestDestinationBlockAndActualEgressAudit(t *testing.T) {
 		t.Fatalf("echo %q: %v", response, err)
 	}
 	record := next()
-	if record.Destination != "localhost" || record.Domain != "localhost" || record.DestinationIP != "127.0.0.1" || record.Outcome != "allowed" {
+	if record.Destination != "localhost" || record.Domain != "localhost" || record.DestinationIP != "127.0.0.1" || record.Outcome != "allowed" || record.BlockReason != "" {
 		t.Fatal(record)
 	}
 	conn.Close()
@@ -97,7 +98,7 @@ func TestDestinationBlockAndActualEgressAudit(t *testing.T) {
 		t.Fatal("blocked TCP returned data")
 	}
 	record = next()
-	if record.DestinationIP != "127.0.0.2" || record.Outcome != "blocked" {
+	if record.DestinationIP != "127.0.0.2" || record.Outcome != "blocked" || !strings.Contains(record.BlockReason, "127.0.0.2/32") {
 		t.Fatal(record)
 	}
 
@@ -141,6 +142,9 @@ func TestDestinationBlockAndActualEgressAudit(t *testing.T) {
 	first, second := next(), next()
 	if first.Outcome != "allowed" || first.DestinationIP != "127.0.0.1" || second.Outcome != "blocked" || second.DestinationIP != "127.0.0.2" {
 		t.Fatalf("UDP audits: %+v %+v", first, second)
+	}
+	if first.BlockReason != "" || second.BlockReason != "最终出口 IP/端口安全检查拦截" {
+		t.Fatalf("UDP audit reasons: %+v %+v", first, second)
 	}
 	select {
 	case r := <-events:

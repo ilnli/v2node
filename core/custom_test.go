@@ -4,7 +4,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	panel "github.com/wyx2685/v2node/api/v2board"
 	"github.com/xtls/xray-core/app/router"
@@ -147,5 +149,77 @@ func TestCNBlockDefaultEgressIsScopedToNode(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("guarded outbound missing")
+	}
+}
+
+func TestSelectedDenyRuleExplainsDomainIPPortAndProtocol(t *testing.T) {
+	syntheticCN(t)
+	rules := []panel.Route{
+		{Id: 11, Action: "block_ip", Match: []string{"geoip:cn"}},
+		{Id: 12, Action: "block_ip", Match: []string{"203.0.113.0/24"}},
+		{Id: 13, Action: "block", Match: []string{"domain:denied.example"}},
+		{Id: 14, Action: "block_port", Match: []string{"8443"}},
+		{Id: 15, Action: "protocol", Match: []string{"bittorrent"}},
+	}
+	_, _, config, err := GetCustomConfig([]*panel.NodeInfo{
+		{Tag: "one", Common: &panel.CommonNode{Routes: rules}},
+		{Tag: "two", Common: &panel.CommonNode{Routes: rules}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := new(router.Router)
+	if err := r.Init(context.Background(), config, &fixedDNS{}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	for _, tc := range []struct {
+		name, destination, protocol, want string
+		port                              xnet.Port
+	}{
+		{"resolved CN", "cn.example", "", "geoip:cn", 443},
+		{"other denied IP", "203.0.113.8", "", "203.0.113.0/24", 443},
+		{"domain", "denied.example", "", "domain:denied.example", 443},
+		{"port", "198.51.100.8", "", "8443", 8443},
+		{"protocol", "198.51.100.8", "bittorrent", "bittorrent", 443},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := session.ContextWithInbound(context.Background(), &session.Inbound{Tag: "two"})
+			ctx = session.ContextWithOutbounds(ctx, []*session.Outbound{{Target: xnet.TCPDestination(xnet.ParseAddress(tc.destination), tc.port)}})
+			ctx = session.ContextWithContent(ctx, &session.Content{Protocol: tc.protocol})
+			selected, err := r.PickRoute(routingSession.AsRoutingContext(ctx))
+			if err != nil || selected.GetOutboundTag() != "block" {
+				t.Fatalf("expected blocked route: %v (%v)", selected, err)
+			}
+			if !strings.Contains(selected.GetRuleTag(), tc.want) {
+				t.Fatalf("matched rule has no reason for %q: %q", tc.want, selected.GetRuleTag())
+			}
+			if tc.name == "resolved CN" && strings.Contains(selected.GetRuleTag(), "203.0.113.0/24") {
+				t.Fatal("reason incorrectly includes a different deny rule")
+			}
+		})
+	}
+}
+
+func TestLongDenyRuleReasonIsBoundedWithoutBreakingRouting(t *testing.T) {
+	var domains []string
+	for i := 0; i < 100; i++ {
+		domains = append(domains, "domain:中文.example")
+	}
+	_, _, config, err := GetCustomConfig([]*panel.NodeInfo{{Tag: "large", Common: &panel.CommonNode{Routes: []panel.Route{{Action: "block", Match: domains}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range config.Rule {
+		if rule.GetTag() != "block" {
+			continue
+		}
+		parts := strings.SplitN(rule.GetRuleTag(), "/", 4)
+		if len(parts) != 4 || parts[0] != "audit-block" || len(parts[3]) > 512 || !utf8.ValidString(parts[3]) {
+			t.Fatalf("missing or invalid bounded audit reason: %q", rule.GetRuleTag())
+		}
+		if len(rule.Domain) != 100 {
+			t.Fatal("reason truncation must not truncate rule matching")
+		}
 	}
 }
