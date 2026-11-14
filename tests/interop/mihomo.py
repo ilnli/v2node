@@ -330,6 +330,7 @@ def cases():
     add("xhttp", "tls", mode="packet-up", variant="h3")
     add("xhttp", "tls", mode="packet-up", variant="xmux")
     add("xhttp", "tls", mode="packet-up", variant="download")
+    add("xhttp", "reality", mode="packet-up", variant="download-tls")
     return matrix
 
 
@@ -390,7 +391,7 @@ def configs(case, creds, reality_port, inbound_port, socks_port):
         node["tls_settings"]["min_client_ver"] = "1.8.2" if case["variant"] == "min-version" else "26.3.27"
     elif case["variant"].startswith("mldsa65-"):
         node["tls_settings"]["mldsa65_seed"] = creds["mldsa_seed"]
-    elif case["variant"] in ("xmux", "download"):
+    elif case["variant"] in ("xmux", "download", "download-tls"):
         node["network_settings"]["extra"] = {"noGRPCHeader": True}
         proxy["xhttp-opts"].update({"no-grpc-header": True, "reuse-settings": {
             "max-concurrency": "4-8", "h-max-request-times": "8-16", "h-max-reusable-secs": "10-20"}})
@@ -439,6 +440,28 @@ def run_case(case, args, root, creds, plain_port, tls_port, udp_port):
     inbound_port, socks_port = free_port(), free_port()
     node, mihomo = configs(case, creds, tls_port, inbound_port, socks_port)
     relay = None
+    bridge = contextlib.nullcontext()
+    if case["variant"] == "download-tls":
+        # Terminate independent TLS, then carry HTTP/2 into the existing REALITY
+        # session hub. Inheriting uplink reality-opts would fail at this TLS endpoint.
+        download_port = free_port()
+        bridge_config = {"log": {"loglevel": "debug"}, "inbounds": [{
+            "listen": HOST, "port": download_port, "protocol": "dokodemo-door",
+            "settings": {"address": HOST, "port": inbound_port, "network": "tcp"},
+            "streamSettings": {"network": "tcp", "security": "tls", "tlsSettings": {
+                "alpn": ["h2"], "certificates": [{"certificateFile": creds["cert"],
+                                                   "keyFile": creds["key"]}]}}}],
+            "outbounds": [{"protocol": "freedom", "settings": {"finalRules": [
+                {"action": "allow", "ip": ["127.0.0.1/32"]}]},
+                "streamSettings": {"network": "tcp", "security": "reality", "realitySettings": {
+                    "serverName": "localhost", "fingerprint": "chrome",
+                    "publicKey": creds["public"], "shortId": "0123456789abcdef"}}}]}
+        write_json(directory / "download-bridge.json", bridge_config)
+        bridge = process([args.xray, "run", "-c", "download-bridge.json"], directory, "download-bridge.log")
+        mihomo["proxies"][0]["xhttp-opts"]["download-settings"] = {
+            "server": HOST, "port": download_port, "path": "/interop", "tls": True,
+            "alpn": ["h2"], "servername": "synthetic-camouflage-000.example.test",
+            "skip-cert-verify": False, "fingerprint": creds["fingerprint"], "reality-opts": {}}
     if case["variant"] == "download":
         relay = socketserver.ThreadingTCPServer((HOST, 0), DownloadRelay)
         relay.daemon_threads = True
@@ -458,8 +481,10 @@ def run_case(case, args, root, creds, plain_port, tls_port, udp_port):
     result = dict(case, status="FAIL", checks={})
     start = time.monotonic()
     try:
-        with (serve(relay) if relay else contextlib.nullcontext()), serve(panel), process([args.proxynode, "server", "--watch=false", "-c", "proxynode.json"],
+        with bridge as bridge_proc, (serve(relay) if relay else contextlib.nullcontext()), serve(panel), process([args.proxynode, "server", "--watch=false", "-c", "proxynode.json"],
                                    directory, "proxynode.log") as server:
+            if bridge_proc is not None:
+                ready(bridge_proc, download_port)
             if case["variant"] != "h3":
                 ready(server, inbound_port)
             else:

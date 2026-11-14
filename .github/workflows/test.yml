@@ -20,14 +20,6 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - name: Resolve upgraded fork dependency graph
-        run: go mod tidy
-      - uses: actions/upload-artifact@v6
-        with:
-          name: security-module-locks
-          path: |
-            go.mod
-            go.sum
       - run: python3 -m unittest discover -s tests/deployment -v
       - run: bash -n script/install.sh script/supervise.sh script/proxynode.sh script/v2node.sh script/package.sh script/download-geodata.sh
       - run: go test ./...
