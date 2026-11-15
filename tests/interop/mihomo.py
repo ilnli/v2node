@@ -559,6 +559,7 @@ def main():
     parser.add_argument("--expected-version", default=VERSION, help="Exact pinned client version token")
     parser.add_argument("--client-source", help="Immutable URL of the tested client archive")
     parser.add_argument("--client-archive-sha256", help="Verified client archive digest")
+    parser.add_argument("--client-preparation", default="original", help="Preparation of the executed client")
     parser.add_argument("--output", help="New directory for configs, logs, and report (default: temporary directory)")
     parser.add_argument("--case", action="append", help="Run exact case name (repeatable); defaults to full matrix")
     parser.add_argument("--list", action="store_true")
@@ -597,6 +598,7 @@ def main():
                             udp.server_address[1]) for case in matrix]
     report = {"mihomo_version": version, "mihomo_sha256": file_sha256(args.mihomo),
               "client_source": args.client_source, "client_archive_sha256": args.client_archive_sha256,
+              "client_preparation": args.client_preparation,
               "proxynode_sha256": file_sha256(args.proxynode), "xray_sha256": file_sha256(args.xray),
               "results": results,
               "unsupported": ["Mihomo ML-DSA-65 verification is not configured; its ML-DSA case proves legacy connectivity only.",

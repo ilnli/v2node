@@ -13,7 +13,7 @@
 
 ## 校验值
 
-压缩包 SHA256 已与同一固定提交中各目录的 `checksums.txt` 核对；二进制 SHA256 是解包后实际执行文件的值。
+压缩包 SHA256 已与同一固定提交中各目录的 `checksums.txt` 核对；下表二进制 SHA256 是从 tar.gz 提取的原始 UPX 压缩可执行文件，也是下述历史 CI 的执行文件。启动异常修复后的执行文件另见报告中的 `mihomo_sha256`。
 
 | 来源目录 | 压缩包 SHA256 | 二进制 SHA256 |
 | --- | --- | --- |
@@ -31,6 +31,16 @@ MIHOMO_SOURCE=openclash-dev-meta bash script/test-mihomo.sh --output /tmp/opencl
 ```
 
 `MIHOMO_SOURCE` 可选 `official`（默认）、`openclash-master-meta`、`openclash-dev-meta`、`openclash-master-smart`、`openclash-dev-smart`。每次验证压缩包 SHA256、实际版本 token，报告记录不可变下载 URL、压缩包及客户端/服务端二进制 SHA256。CI 对四种来源分别运行全部用例；某种失败不会阻止收集其他来源结果，任一失败会让该验证步骤失败。
+
+## UPX 启动异常处理（2026-11-15）
+
+合并后 [CI 43686907058](https://github.com/ilnli/v2node/actions/runs/43686907058) 的前两次运行中，`master/meta` 分别在 `ws-tls` 和 `xhttp-tls-packet-up-download` 用例启动时退出 127，客户端日志为空，尚未进行传输。第二次运行的 `ws-tls` 已通过；两轮其他四组矩阵均为 39/39。原始可执行文件带有 UPX 3.95 加载器；[UPX 文档](https://github.com/upx/upx/blob/devel/doc/upx-doc.html) 说明加载器内部错误使用退出码 127，现象指向该启动路径，未取得失败时的系统调用跟踪以确定底层触发点。
+
+套件现在先验证同一 OpenClash 原始包，再使用固定的 [UPX 5.3.0](https://github.com/upx/upx/releases/tag/v5.3.0) 执行 `upx -d`，移除运行时解压加载器后测试同一内核。UPX Linux amd64 下载包 SHA256 固定为 `79cea8a50b6fa102d10c7b79a419cd77dead3cc2d78661de2dc5e5815dc505c1`；下载、校验或解压失败仍直接失败。报告的 `client_preparation` 标记为 `upx-5.3.0-decompressed`，`client_archive_sha256` 保留 OpenClash 原始包校验值，`mihomo_sha256` 记录实际运行的解压后二进制。官方 Mihomo 不做该处理，标记为 `original`。
+
+同一 `master/meta` 二进制的本地对照中，仅执行 `-v` 各 250 次：原始 UPX 文件出现两次退出 127 且输出为空，解压后 250 次全部成功，成功运行的版本输出完全相同。这在不加载代理配置、不进行网络连接的情况下复现了启动故障，并验证了移除运行时加载器后的结果。
+
+此处理验证内核协议互通，不再覆盖原始 UPX 加载器在目标系统上的启动可靠性。没有重编译或更换内核，也没有重试、跳过或放宽失败用例。以下是处理前已通过的历史基线，不能代替修复后的 CI 结果。
 
 [CI 43673311124](https://github.com/ilnli/v2node/actions/runs/43673311124) 在节点提交 [`48e2ee0a4d5b`](https://github.com/ilnli/v2node/commit/48e2ee0a4d5beedd9f368375cbcb357f8aecf409) 完成：四组各 **39/39** 通过，官方 Mihomo v1.19.34 同轮 **39/39** 通过；全包 Go 测试、核心 race、静态构建与真实 worker 生命周期检查也全部通过。没有失败项，没有跳过或放宽任何互通断言。
 

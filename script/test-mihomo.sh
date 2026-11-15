@@ -45,10 +45,28 @@ if [[ ! -f $archive ]]; then
 fi
 printf '%s  %s\n' "$sha256" "$archive" | sha256sum --check --status
 client="$cache/$source-$version"
+preparation=original
 if [[ $source == official ]]; then
   gzip -dc "$archive" > "$client"
 else
   tar -xOzf "$archive" clash > "$client"
+  # The distributed UPX 3.95 loader can exit 127 before Mihomo starts on CI.
+  # Unpack the same verified client instead of retrying or skipping failed cases.
+  upx_version=5.3.0
+  upx_sha256=79cea8a50b6fa102d10c7b79a419cd77dead3cc2d78661de2dc5e5815dc505c1
+  upx_archive="$cache/upx-$upx_version-amd64_linux.tar.xz"
+  if [[ ! -f $upx_archive ]]; then
+    curl -4 -fL --retry 3 --connect-timeout 15 --max-time 180 \
+      "https://github.com/upx/upx/releases/download/v$upx_version/upx-$upx_version-amd64_linux.tar.xz" \
+      -o "$upx_archive.part"
+    mv "$upx_archive.part" "$upx_archive"
+  fi
+  printf '%s  %s\n' "$upx_sha256" "$upx_archive" | sha256sum --check --status
+  upx="$cache/upx-$upx_version"
+  tar -xOJf "$upx_archive" "upx-$upx_version-amd64_linux/upx" > "$upx"
+  chmod +x "$upx"
+  "$upx" -d "$client"
+  preparation="upx-$upx_version-decompressed"
 fi
 chmod +x "$client"
 
@@ -67,4 +85,5 @@ if [[ -z $xray ]]; then
   (cd "$repo" && GOEXPERIMENT=jsonv2 go build -o "$xray" github.com/xtls/xray-core/main)
 fi
 python3 "$repo/tests/interop/mihomo.py" --proxynode "$binary" --mihomo "$client" --xray "$xray" \
-  --expected-version "$version" --client-source "$url" --client-archive-sha256 "$sha256" "$@"
+  --expected-version "$version" --client-source "$url" --client-archive-sha256 "$sha256" \
+  --client-preparation "$preparation" "$@"
