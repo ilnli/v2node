@@ -102,3 +102,7 @@ Xray 默认阻止私网目的地址。测试面板通过正式 `default_out` 配
 ## 2026-10-30 审计补丁复验
 
 官方最新正式版核验仍为 v1.19.33（发布于 2026-10-21），下载资产 SHA256 不变。包含出站审计 hook 和 CN 目标规则的候选再次通过上述 31/31 项；额外的真实 TCP/UDP 测试验证拒绝后续 UDP 目标以及实际 IP/拒绝审计，PostgreSQL 和 MySQL 的真实 Mihomo → proxynode → 面板链路均通过。原覆盖限制仍适用。
+
+## 2026-11-15 OpenClash 分发内核补验
+
+保留官方 v1.19.34 门槛，新增固定 OpenClash `core` 提交下的 Meta/Smart、master/dev 四组 Linux amd64-compatible 实际二进制。四组各通过同一 39 项（38 项使用对应内核，1 项为 Xray ML-DSA 验签对照），官方客户端同轮也通过 39/39。具体版本、摘要、CI 证据及路由器环境限制见 [OpenClash 互通验证](openclash-interop.md)。
