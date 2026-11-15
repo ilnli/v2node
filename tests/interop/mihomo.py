@@ -602,7 +602,7 @@ def main():
               "unsupported": ["Mihomo ML-DSA-65 verification is not configured; its ML-DSA case proves legacy connectivity only.",
                               "Mihomo uses XUDP by default; packetaddr is not tested."],
               "known_incompatible": ["REALITY without support-x25519mlkem768:true is rejected.",
-                                     "Mihomo advertises REALITY client version 1.8.2 and is rejected by minClientVer26.3.27."],
+                                     "Minimum-version cases probe acceptance at 1.8.2 and rejection at 26.3.27; they do not measure the exact advertised wire version."],
               "not_tested": ["IPv6, external CDN/reverse proxies, packetaddr, every encryption key/padding/transport permutation",
                              "ML-DSA camouflage-target hybrid key exchange (local OpenSSL target)"]}
     write_json(root / "report.json", report)
