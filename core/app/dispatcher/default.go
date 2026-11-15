@@ -529,6 +529,7 @@ func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.
 	ob := outbounds[len(outbounds)-1]
 
 	var handler outbound.Handler
+	var ruleTag string
 
 	routingLink := routing_session.AsRoutingContext(ctx)
 	inTag := routingLink.GetInboundTag()
@@ -550,6 +551,7 @@ func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.
 			outTag := route.GetOutboundTag()
 			if h := d.ohm.GetHandler(outTag); h != nil {
 				isPickRoute = 2
+				ruleTag = route.GetRuleTag()
 				if route.GetRuleTag() == "" {
 					errors.LogInfo(ctx, "taking detour [", outTag, "] for [", destination, "]")
 				} else {
@@ -597,6 +599,6 @@ func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.
 		log.Record(accessMessage)
 	}
 
-	ctx = auditOutbound(ctx, handler, destination)
+	ctx = auditOutbound(ctx, handler, destination, ruleTag)
 	handler.Dispatch(ctx, link)
 }

@@ -14,9 +14,10 @@ import (
 type auditContextKey struct{}
 type auditSession struct {
 	sync.Mutex
-	seen     [64]string
-	next     int
-	recorded bool
+	seen        [64]string
+	next        int
+	recorded    bool
+	blockReason string
 }
 
 // withAudit observes real egress events after sniffing. A small ring suppresses
@@ -67,10 +68,14 @@ func (d *DefaultDispatcher) withAudit(ctx context.Context, original net.Destinat
 		state.seen[state.next] = key
 		state.next = (state.next + 1) % len(state.seen)
 		state.recorded = true
+		reason := ""
+		if event.Outcome == "blocked" {
+			reason = state.blockReason
+		}
 		state.Unlock()
 		d.Audit(inbound.Tag, inbound.User.Email, audit.Record{
 			Timestamp: time.Now().UnixMilli(), Destination: target.Address.String(), Port: uint16(target.Port), Network: network, Domain: eventDomain,
-			DestinationIP: ip, Outcome: event.Outcome,
+			DestinationIP: ip, Outcome: event.Outcome, BlockReason: reason,
 		})
 	})
 }
@@ -90,8 +95,9 @@ func finishAudit(ctx context.Context) {
 	}
 }
 
-func auditOutbound(ctx context.Context, handler outbound.Handler, destination net.Destination) context.Context {
-	if ctx.Value(auditContextKey{}) == nil {
+func auditOutbound(ctx context.Context, handler outbound.Handler, destination net.Destination, ruleTag string) context.Context {
+	state, _ := ctx.Value(auditContextKey{}).(*auditSession)
+	if state == nil {
 		return ctx
 	}
 	settings := handler.ProxySettings()
@@ -100,11 +106,22 @@ func auditOutbound(ctx context.Context, handler outbound.Handler, destination ne
 	}
 	switch settings.Type {
 	case "xray.proxy.blackhole.Config":
+		reason := audit.BlockReasonFromRuleTag(ruleTag)
+		if reason == "" {
+			reason = "黑洞出口拦截（未提供路由规则）"
+		}
+		state.Lock()
+		state.blockReason = reason
+		state.Unlock()
 		// A domain denied before dialing has no actual connection IP. Do not
 		// misrepresent one of its DNS candidates as an established connection.
 		session.ReportEgress(ctx, session.EgressEvent{Destination: destination, Requested: destination, Outcome: "blocked"})
 	case "xray.proxy.freedom.Config":
 		// Direct egress reports from the actual dial / packet write boundary.
+		// The current core observer does not expose which final rule matched.
+		state.Lock()
+		state.blockReason = "最终出口 IP/端口安全检查拦截"
+		state.Unlock()
 	default:
 		session.ReportEgress(ctx, session.EgressEvent{Outcome: "unknown"})
 		return session.ContextWithEgressObserver(ctx, nil)

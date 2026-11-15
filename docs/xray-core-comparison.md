@@ -1,5 +1,11 @@
 # Xray-core 修改版对比与 Mihomo 升级约束
 
+## 2026-11-14 安全同步
+
+本分支合并官方 v26.11.9，fork 固定提交 `34846a645f348f69bea579ffc4daf47399c281e3`，保留 AnyTLS、TUIC、Go 1.27 Vision 兼容及 egress audit hook。上游 v26.10.31 对 MPTCP listener 显式默认关闭，随后 v26.11.9 更新 Chrome 指纹。它减少应用监听攻击面，不能替代 Linux 内核安全更新；本次未修改宿主机或部署。
+
+来源：[v26.10.31 安全说明](https://github.com/XTLS/Xray-core/releases/tag/v26.10.31)、[v26.11.9](https://github.com/XTLS/Xray-core/releases/tag/v26.11.9)。内核 fork CI 已通过；节点完整升级门槛见 [Mihomo 互通](mihomo-interop.md) 的 39/39 项验证记录（节点提交 `d50e7001ecee`，CI `43621839778`），历史通过结果不作本次证据。
+
 ## 2026-10-30 出站审计补丁
 
 依赖在上述官方版本基础上固定到自有 fork [`4155e282792c`](https://github.com/ilnli/Xray-core/commit/4155e282792c44c3ab09f49570ec0da544bd9034)。补丁仅增加 context 范围的出站元数据回调，在 Freedom 实际拨号、UDP 写入和最终规则拒绝处报告目标及结果，不变更 TLS/REALITY/VLESS 实现和 Go 工具链。代理链禁止把中间代理地址误记为最终目标。
@@ -8,7 +14,7 @@
 
 ## 2026-10-29 同步状态
 
-现行依赖已同步官方 [v26.10.29](https://github.com/XTLS/Xray-core/releases/tag/v26.10.29)，fork 合并提交为 [`3c160b27cb42`](https://github.com/ilnli/Xray-core/commit/3c160b27cb42435487f273c095b31271e812f47f)。当日 `go.mod` 的 `replace` 固定到该提交，Go 工具链为 1.27.3。AnyTLS/TUIC、Shadowsocks 扩展和旧 fork 历史保留，非生成的 VLESS、Vision、REALITY、XHTTP 实现与官方版本一致。
+当日依赖同步官方 [v26.10.29](https://github.com/XTLS/Xray-core/releases/tag/v26.10.29)，fork 合并提交为 [`3c160b27cb42`](https://github.com/ilnli/Xray-core/commit/3c160b27cb42435487f273c095b31271e812f47f)。当日 `go.mod` 的 `replace` 固定到该提交，Go 工具链为 1.27.3。AnyTLS/TUIC、Shadowsocks 扩展和旧 fork 历史保留，非生成的 VLESS、Vision、REALITY、XHTTP 实现与官方版本一致。
 
 本次纳入 Freedom `blockDelay`、WebSocket 正常关闭、DNS 响应边界、入站模块初始化顺序及 Geodata 等修复，并包含上游 XDRIVE 更新。VLESS Encryption 仍可设置为 `none` 并使用 TLS/REALITY；Xray 出站对免传输加密的私网地址例外判断更严格。仅在回环受信网络执行的无 TLS 测试，不代表公网明文部署建议。
 

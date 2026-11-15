@@ -2,10 +2,12 @@ package core
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"strings"
 
 	panel "github.com/wyx2685/v2node/api/v2board"
+	"github.com/wyx2685/v2node/common/audit"
 	"github.com/xtls/xray-core/app/dns"
 	"github.com/xtls/xray-core/app/router"
 	xnet "github.com/xtls/xray-core/common/net"
@@ -42,6 +44,16 @@ func hasOutboundWithTag(list []*core.OutboundHandlerConfig, tag string) bool {
 	return false
 }
 
+func blockRuleTag(node string, position int, route panel.Route) string {
+	label := map[string]string{"block": "域名", "block_ip": "IP", "block_port": "端口", "protocol": "协议"}[route.Action]
+	reason := label + " 拦截规则"
+	if route.Id > 0 {
+		reason += fmt.Sprintf(" #%d", route.Id)
+	}
+	reason += "：" + strings.Join(route.Match, ", ")
+	return audit.BlockRuleTag(node, position, reason)
+}
+
 func GetCustomConfig(infos []*panel.NodeInfo) (*dns.Config, []*core.OutboundHandlerConfig, *router.Config, error) {
 	//dns
 	queryStrategy := "UseIPv4v6"
@@ -59,7 +71,7 @@ func GetCustomConfig(infos []*panel.NodeInfo) (*dns.Config, []*core.OutboundHand
 		QueryStrategy: queryStrategy,
 	}
 	//outbound
-	defaultoutbound, _ := buildDefaultOutbound()
+	defaultoutbound, _ := buildDefaultOutbound(queryStrategy)
 	coreOutboundConfig := append([]*core.OutboundHandlerConfig{}, defaultoutbound)
 	block, _ := buildBlockOutbound()
 	coreOutboundConfig = append(coreOutboundConfig, block)
@@ -82,11 +94,14 @@ func GetCustomConfig(infos []*panel.NodeInfo) (*dns.Config, []*core.OutboundHand
 	// IPOnDemand resolves domain targets before an IP rule can be bypassed by a
 	// catch-all default outbound. No source-IP condition is introduced.
 	for _, info := range infos {
-		if ips := blockedIPs(info); len(ips) > 0 {
+		for i, route := range info.Common.Routes {
+			if route.Action != "block_ip" || len(route.Match) == 0 {
+				continue
+			}
 			domainStrategy = "IPOnDemand"
 			raw, err := json.Marshal(map[string]interface{}{
-				"inboundTag": info.Tag, "ip": ips, "outboundTag": "block",
-				"ruleTag": "deny-ip/" + info.Tag,
+				"inboundTag": info.Tag, "ip": route.Match, "outboundTag": "block",
+				"ruleTag": blockRuleTag(info.Tag, i, route),
 			})
 			if err != nil {
 				return nil, nil, nil, err
@@ -101,7 +116,7 @@ func GetCustomConfig(infos []*panel.NodeInfo) (*dns.Config, []*core.OutboundHand
 		if len(info.Common.Routes) == 0 {
 			continue
 		}
-		for _, route := range info.Common.Routes {
+		for i, route := range info.Common.Routes {
 			switch route.Action {
 			case "dns":
 				if route.ActionValue == nil {
@@ -119,6 +134,7 @@ func GetCustomConfig(infos []*panel.NodeInfo) (*dns.Config, []*core.OutboundHand
 				coreDnsConfig.Servers = append(coreDnsConfig.Servers, server)
 			case "block":
 				rule := map[string]interface{}{
+					"ruleTag":     blockRuleTag(info.Tag, i, route),
 					"inboundTag":  info.Tag,
 					"domain":      route.Match,
 					"outboundTag": "block",
@@ -133,6 +149,7 @@ func GetCustomConfig(infos []*panel.NodeInfo) (*dns.Config, []*core.OutboundHand
 				continue
 			case "block_port":
 				rule := map[string]interface{}{
+					"ruleTag":     blockRuleTag(info.Tag, i, route),
 					"inboundTag":  info.Tag,
 					"port":        strings.Join(route.Match, ","),
 					"outboundTag": "block",
@@ -144,6 +161,7 @@ func GetCustomConfig(infos []*panel.NodeInfo) (*dns.Config, []*core.OutboundHand
 				coreRouterConfig.RuleList = append(coreRouterConfig.RuleList, rawRule)
 			case "protocol":
 				rule := map[string]interface{}{
+					"ruleTag":     blockRuleTag(info.Tag, i, route),
 					"inboundTag":  info.Tag,
 					"protocol":    route.Match,
 					"outboundTag": "block",
@@ -248,7 +266,7 @@ func GetCustomConfig(infos []*panel.NodeInfo) (*dns.Config, []*core.OutboundHand
 			}
 		}
 		if len(ips) > 0 {
-			settings := json.RawMessage(`{"domainStrategy":"UseIPv4v6"}`)
+			settings := json.RawMessage(fmt.Sprintf(`{"domainStrategy":%q}`, queryStrategy))
 			outbound := &coreConf.OutboundDetourConfig{Tag: "Default", Protocol: "freedom", Settings: &settings}
 			if err := guardDirectOutbound(outbound, info, ips); err != nil {
 				return nil, nil, nil, err

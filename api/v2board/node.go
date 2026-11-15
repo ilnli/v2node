@@ -78,27 +78,60 @@ type BaseConfig struct {
 }
 
 type TlsSettings struct {
-	Email            string            `json:"email"`
-	ACMEDirectory    string            `json:"acme_directory"`
-	DNSEnvMap        map[string]string `json:"dns_env_map"`
-	ALPN             []string          `json:"alpn,omitempty"`
-	ServerName       string            `json:"server_name"`
-	ServerNames      []string          `json:"server_names"`
-	Dest             string            `json:"dest"`
-	ServerPort       string            `json:"server_port"`
-	ShortId          string            `json:"short_id"`
-	ShortIds         []string          `json:"short_ids"`
-	PrivateKey       string            `json:"private_key"`
-	Mldsa65Seed      string            `json:"mldsa65Seed"`
-	Xver             uint64            `json:"xver,string"`
-	CertMode         string            `json:"cert_mode"`
-	CertFile         string            `json:"cert_file"`
-	KeyFile          string            `json:"key_file"`
-	TlsCert          string            `json:"tls_cert"`
-	TlsKey           string            `json:"tls_key"`
-	Provider         string            `json:"provider"`
-	DNSEnv           string            `json:"dns_env"`
-	RejectUnknownSni string            `json:"reject_unknown_sni"`
+	Email                 string            `json:"email"`
+	ACMEDirectory         string            `json:"acme_directory"`
+	DNSEnvMap             map[string]string `json:"dns_env_map"`
+	ALPN                  []string          `json:"alpn,omitempty"`
+	ServerName            string            `json:"server_name"`
+	ServerNames           []string          `json:"server_names"`
+	Dest                  string            `json:"dest"`
+	ServerPort            string            `json:"server_port"`
+	ShortId               string            `json:"short_id"`
+	ShortIds              []string          `json:"short_ids"`
+	PrivateKey            string            `json:"private_key"`
+	Mldsa65Seed           string            `json:"mldsa65_seed"`
+	MinClientVer          string            `json:"min_client_ver"`
+	LimitFallbackUpload   LimitFallback     `json:"limit_fallback_upload"`
+	LimitFallbackDownload LimitFallback     `json:"limit_fallback_download"`
+	Xver                  uint64            `json:"xver,string"`
+	CertMode              string            `json:"cert_mode"`
+	CertFile              string            `json:"cert_file"`
+	KeyFile               string            `json:"key_file"`
+	TlsCert               string            `json:"tls_cert"`
+	TlsKey                string            `json:"tls_key"`
+	Provider              string            `json:"provider"`
+	DNSEnv                string            `json:"dns_env"`
+	RejectUnknownSni      string            `json:"reject_unknown_sni"`
+}
+
+type LimitFallback struct {
+	AfterBytes       uint64 `json:"afterBytes"`
+	BytesPerSec      uint64 `json:"bytesPerSec"`
+	BurstBytesPerSec uint64 `json:"burstBytesPerSec"`
+}
+
+func (t *TlsSettings) UnmarshalJSON(data []byte) error {
+	type plain TlsSettings
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	for alias, canonical := range map[string]string{
+		"minClientVer": "min_client_ver", "mldsa65Seed": "mldsa65_seed",
+		"limitFallbackUpload": "limit_fallback_upload", "limitFallbackDownload": "limit_fallback_download",
+		"serverNames": "server_names", "shortIds": "short_ids",
+	} {
+		if _, present := fields[canonical]; !present {
+			if value, exists := fields[alias]; exists {
+				fields[canonical] = value
+			}
+		}
+	}
+	encoded, err := json.Marshal(fields)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(encoded, (*plain)(t))
 }
 
 type CertInfo struct {
@@ -117,10 +150,11 @@ type CertInfo struct {
 }
 
 type EncSettings struct {
-	Mode          string `json:"mode"`
-	Ticket        string `json:"ticket"`
-	ServerPadding string `json:"server_padding"`
-	PrivateKey    string `json:"private_key"`
+	Mode          string   `json:"mode"`
+	Ticket        string   `json:"ticket"`
+	ServerPadding string   `json:"server_padding"`
+	PrivateKey    string   `json:"private_key"`
+	PrivateKeys   []string `json:"private_keys"`
 }
 
 func (c *Client) GetNodeInfo(ctx context.Context) (node *NodeInfo, err error) {

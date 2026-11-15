@@ -4,6 +4,7 @@
 import argparse
 import base64
 import contextlib
+import concurrent.futures
 import hashlib
 import http.client
 import http.server
@@ -20,7 +21,7 @@ import threading
 import time
 import urllib.parse
 
-VERSION = "v1.19.33"
+VERSION = "v1.19.34"
 UUID = "c7599b31-fc0b-4b36-9626-f7ce2adeb767"
 HOST = "127.0.0.1"
 TIMEOUT = 15
@@ -127,6 +128,29 @@ class UDPEcho(socketserver.BaseRequestHandler):
     def handle(self):
         data, sock = self.request
         sock.sendto(data, self.client_address)
+
+
+class DownloadRelay(socketserver.BaseRequestHandler):
+    """Separate download endpoint forwarding TLS bytes to the same XHTTP session hub."""
+    def handle(self):
+        with socket.create_connection((HOST, self.server.target_port), TIMEOUT) as upstream:
+            self.server.connections += 1
+            def copy(source, target):
+                try:
+                    while data := source.recv(65536):
+                        target.sendall(data)
+                        self.server.transferred += len(data)
+                except OSError:
+                    pass
+                finally:
+                    try:
+                        target.shutdown(socket.SHUT_WR)
+                    except OSError:
+                        pass
+            thread = threading.Thread(target=copy, args=(self.request, upstream), daemon=True)
+            thread.start()
+            copy(upstream, self.request)
+            thread.join(timeout=TIMEOUT)
 
 
 class TLSHTTPServer(http.server.ThreadingHTTPServer):
@@ -243,19 +267,33 @@ def udp_transfer(socks_port, target_port):
         return total
 
 
-def credentials(directory):
+def credentials(directory, xray):
     key, cert = directory / "tls.key", directory / "tls.crt"
     subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
                     "-keyout", str(key), "-out", str(cert), "-days", "1", "-subj", "/CN=localhost",
-                    "-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1"],
+                    "-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1," + ",".join(
+                        f"DNS:synthetic-camouflage-{i:03d}.example.test" for i in range(100))],
                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     private = subprocess.check_output(["openssl", "genpkey", "-algorithm", "X25519", "-outform", "DER"])
     public = subprocess.check_output(["openssl", "pkey", "-inform", "DER", "-pubout", "-outform", "DER"],
                                      input=private)
     encode = lambda data: base64.urlsafe_b64encode(data[-32:]).decode().rstrip("=")
     der = ssl.PEM_cert_to_DER_cert(cert.read_text())
+    if len(der) <= 3500:
+        raise AssertionError("ML-DSA camouflage certificate must exceed 3500 bytes")
+    seed = base64.urlsafe_b64encode(bytes(range(32))).decode().rstrip("=")
+    def mldsa(value):
+        output = subprocess.check_output([xray, "mldsa65", "-i", value], text=True)
+        return dict(line.split(": ", 1) for line in output.splitlines() if ": " in line)
+    pair = mldsa(seed)
+    verifier = base64.urlsafe_b64decode(pair["Verify"] + "==")
+    # Independent Python cryptography50 fixture proves the panel/kernel seed format agrees.
+    if hashlib.sha256(verifier).hexdigest() != "d666806e11cee19a7c989f7445f90dd419cf4d2d51db8c0fdb4c0f0a542238c9":
+        raise AssertionError("ML-DSA-65 seed derivation differs from the panel fixture")
+    wrong = mldsa(base64.urlsafe_b64encode(bytes(reversed(range(32)))).decode().rstrip("="))
     return {"cert": str(cert), "key": str(key), "private": encode(private), "public": encode(public),
-            "fingerprint": hashlib.sha256(der).hexdigest()}
+            "fingerprint": hashlib.sha256(der).hexdigest(), "mldsa_seed": pair["Seed"],
+            "mldsa_verify": pair["Verify"], "mldsa_wrong_verify": wrong["Verify"]}
 
 
 def cases():
@@ -280,11 +318,19 @@ def cases():
     for encryption in ("native-1rtt", "xorpub-0rtt", "random-1rtt"):
         add("tcp", "plain", encryption=encryption)
     add("tcp", "tls", flow="xtls-rprx-vision", encryption="native-1rtt")
+    add("tcp", "plain", flow="xtls-rprx-vision", encryption="native-1rtt")
+    add("tcp", "reality", variant="min-version")
+    add("tcp", "reality", variant="min-version-reject")
+    add("tcp", "reality", variant="mldsa65-compat")
+    add("tcp", "reality", variant="mldsa65-verify")
     add("tcp", "tls", variant="pinned-cert")
     add("ws", "tls", variant="early-data")
     add("httpupgrade", "tls", variant="fast-open")
     add("xhttp", "tls", mode="packet-up", variant="h1")
     add("xhttp", "tls", mode="packet-up", variant="h3")
+    add("xhttp", "tls", mode="packet-up", variant="xmux")
+    add("xhttp", "tls", mode="packet-up", variant="download")
+    add("xhttp", "reality", mode="packet-up", variant="download-tls")
     return matrix
 
 
@@ -340,10 +386,52 @@ def configs(case, creds, reality_port, inbound_port, socks_port):
         alpn = "http/1.1" if case["variant"] == "h1" else "h3"
         proxy["alpn"] = [alpn]
         node["tls_settings"]["alpn"] = [alpn]
+    elif case["variant"] in ("min-version", "min-version-reject"):
+        # Mihomo v1.19.34 still identifies itself as 1.8.2 on the REALITY wire.
+        node["tls_settings"]["min_client_ver"] = "1.8.2" if case["variant"] == "min-version" else "26.3.27"
+    elif case["variant"].startswith("mldsa65-"):
+        node["tls_settings"]["mldsa65_seed"] = creds["mldsa_seed"]
+    elif case["variant"] in ("xmux", "download", "download-tls"):
+        node["network_settings"]["extra"] = {"noGRPCHeader": True}
+        proxy["xhttp-opts"].update({"no-grpc-header": True, "reuse-settings": {
+            "max-concurrency": "4-8", "h-max-request-times": "8-16", "h-max-reusable-secs": "10-20"}})
     mihomo = {"mixed-port": socks_port, "bind-address": HOST, "allow-lan": False,
               "mode": "rule", "log-level": "debug", "ipv6": False,
               "dns": {"enable": False}, "proxies": [proxy], "rules": ["MATCH,tested-proxynode"]}
     return node, mihomo
+
+
+def expect_rejected(socks_port, target_port):
+    try:
+        transfer(socks_port, target_port)
+    except (OSError, EOFError, http.client.HTTPException):
+        return True
+    except AssertionError as exc:
+        if str(exc).startswith("SOCKS request failed:"):
+            return True
+        raise
+    raise AssertionError("rejected credential unexpectedly passed a transfer")
+
+
+def xray_mldsa_checks(args, directory, creds, inbound_port, socks_port, plain_port, tls_port, udp_port):
+    config = {"log": {"loglevel": "debug"},
+              "inbounds": [{"listen": HOST, "port": socks_port, "protocol": "socks", "settings": {"udp": True}}],
+              "outbounds": [{"protocol": "vless", "settings": {"vnext": [{"address": HOST, "port": inbound_port,
+                  "users": [{"id": UUID, "encryption": "none"}]}]}, "streamSettings": {"network": "tcp",
+                  "security": "reality", "realitySettings": {"serverName": "localhost", "fingerprint": "chrome",
+                  "publicKey": creds["public"], "shortId": "0123456789abcdef", "mldsa65Verify": creds["mldsa_verify"]}}}]}
+    write_json(directory / "xray-client.json", config)
+    with process([args.xray, "run", "-c", "xray-client.json"], directory, "xray-client.log") as client:
+        ready(client, socks_port)
+        checks = {"xray-mldsa65-tcp": transfer(socks_port, plain_port),
+                  "xray-mldsa65-tls13": transfer(socks_port, tls_port, True),
+                  "xray-mldsa65-udp": udp_transfer(socks_port, udp_port)}
+    config["outbounds"][0]["streamSettings"]["realitySettings"]["mldsa65Verify"] = creds["mldsa_wrong_verify"]
+    write_json(directory / "xray-wrong-verifier.json", config)
+    with process([args.xray, "run", "-c", "xray-wrong-verifier.json"], directory, "xray-wrong-verifier.log") as client:
+        ready(client, socks_port)
+        checks["wrong-mldsa65-verifier-rejected"] = expect_rejected(socks_port, plain_port)
+    return checks
 
 
 def run_case(case, args, root, creds, plain_port, tls_port, udp_port):
@@ -351,6 +439,36 @@ def run_case(case, args, root, creds, plain_port, tls_port, udp_port):
     directory.mkdir()
     inbound_port, socks_port = free_port(), free_port()
     node, mihomo = configs(case, creds, tls_port, inbound_port, socks_port)
+    relay = None
+    bridge = contextlib.nullcontext()
+    if case["variant"] == "download-tls":
+        # Terminate independent TLS, then carry HTTP/2 into the existing REALITY
+        # session hub. Inheriting uplink reality-opts would fail at this TLS endpoint.
+        download_port = free_port()
+        bridge_config = {"log": {"loglevel": "debug"}, "inbounds": [{
+            "listen": HOST, "port": download_port, "protocol": "dokodemo-door",
+            "settings": {"address": HOST, "port": inbound_port, "network": "tcp"},
+            "streamSettings": {"network": "tcp", "security": "tls", "tlsSettings": {
+                "alpn": ["h2"], "certificates": [{"certificateFile": creds["cert"],
+                                                   "keyFile": creds["key"]}]}}}],
+            "outbounds": [{"protocol": "freedom", "settings": {"finalRules": [
+                {"action": "allow", "ip": ["127.0.0.1/32"]}]},
+                "streamSettings": {"network": "tcp", "security": "reality", "realitySettings": {
+                    "serverName": "localhost", "fingerprint": "chrome",
+                    "publicKey": creds["public"], "shortId": "0123456789abcdef"}}}]}
+        write_json(directory / "download-bridge.json", bridge_config)
+        bridge = process([args.xray, "run", "-c", "download-bridge.json"], directory, "download-bridge.log")
+        mihomo["proxies"][0]["xhttp-opts"]["download-settings"] = {
+            "server": HOST, "port": download_port, "path": "/interop", "tls": True,
+            "alpn": ["h2"], "servername": "synthetic-camouflage-000.example.test",
+            "skip-cert-verify": False, "fingerprint": creds["fingerprint"], "reality-opts": {"public-key": ""}}
+    if case["variant"] == "download":
+        relay = socketserver.ThreadingTCPServer((HOST, 0), DownloadRelay)
+        relay.daemon_threads = True
+        relay.target_port, relay.connections, relay.transferred = inbound_port, 0, 0
+        mihomo["proxies"][0]["xhttp-opts"]["download-settings"] = {
+            "server": HOST, "port": relay.server_address[1], "path": "/interop", "tls": True,
+            "alpn": ["h2"], "servername": "localhost", "skip-cert-verify": True}
     write_json(directory / "panel.json", node)
     panel = http.server.ThreadingHTTPServer((HOST, 0), PanelHandler)
     panel.node = node
@@ -363,8 +481,10 @@ def run_case(case, args, root, creds, plain_port, tls_port, udp_port):
     result = dict(case, status="FAIL", checks={})
     start = time.monotonic()
     try:
-        with serve(panel), process([args.proxynode, "server", "--watch=false", "-c", "proxynode.json"],
+        with bridge as bridge_proc, (serve(relay) if relay else contextlib.nullcontext()), serve(panel), process([args.proxynode, "server", "--watch=false", "-c", "proxynode.json"],
                                    directory, "proxynode.log") as server:
+            if bridge_proc is not None:
+                ready(bridge_proc, download_port)
             if case["variant"] != "h3":
                 ready(server, inbound_port)
             else:
@@ -373,23 +493,38 @@ def run_case(case, args, root, creds, plain_port, tls_port, udp_port):
                     if server.poll() is not None or time.monotonic() > deadline:
                         raise RuntimeError("proxynode HTTP/3 listener did not initialize")
                     time.sleep(0.05)
-            with process([args.mihomo, "-d", str(directory), "-f", "mihomo.json"], directory, "mihomo.log") as client:
-                ready(client, socks_port)
-                ready_mihomo(client, socks_port, panel.server_port)
-                for label, target, tls in (("tcp", plain_port, False), ("tls13", tls_port, True)):
-                    result["phase"] = label
-                    result["checks"][label] = transfer(socks_port, target, tls)
-                if case["encryption"].endswith("0rtt"):
-                    result["checks"]["resumed-tls13"] = transfer(socks_port, tls_port, True)
-                result["phase"] = "udp-xudp"
-                result["checks"]["udp-xudp"] = udp_transfer(socks_port, udp_port)
-                if case["flow"]:
-                    log = (directory / "proxynode.log").read_text()
-                    if "XtlsFilterTls found tls 1.3!" not in log or "command 2" not in log:
-                        raise AssertionError("Vision did not recognize TLS 1.3 and switch to direct copy")
-                    result["checks"]["vision-direct-copy"] = True
-                if server.poll() is not None or client.poll() is not None:
-                    raise RuntimeError("proxy exited during transfers")
+            if case["variant"] == "mldsa65-verify":
+                result["checks"] = xray_mldsa_checks(args, directory, creds, inbound_port,
+                                                     socks_port, plain_port, tls_port, udp_port)
+            else:
+                with process([args.mihomo, "-d", str(directory), "-f", "mihomo.json"], directory, "mihomo.log") as client:
+                    ready(client, socks_port)
+                    ready_mihomo(client, socks_port, panel.server_port)
+                    if case["variant"] == "min-version-reject":
+                        result["checks"]["min-version-rejected"] = expect_rejected(socks_port, plain_port)
+                    else:
+                        for label, target, tls in (("tcp", plain_port, False), ("tls13", tls_port, True)):
+                            result["phase"] = label
+                            result["checks"][label] = transfer(socks_port, target, tls)
+                        if case["encryption"].endswith("0rtt"):
+                            result["checks"]["resumed-tls13"] = transfer(socks_port, tls_port, True)
+                        result["phase"] = "udp-xudp"
+                        result["checks"]["udp-xudp"] = udp_transfer(socks_port, udp_port)
+                        if case["flow"]:
+                            log = (directory / "proxynode.log").read_text()
+                            if "XtlsFilterTls found tls 1.3!" not in log or "command 2" not in log:
+                                raise AssertionError("Vision did not recognize TLS 1.3 and switch to direct copy")
+                            result["checks"]["vision-direct-copy"] = True
+                    if case["variant"] == "xmux":
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                            result["checks"]["xmux-concurrent-tls13"] = list(pool.map(
+                                lambda _: transfer(socks_port, tls_port, True), range(4)))
+                    if relay is not None:
+                        if relay.connections < 1 or relay.transferred < 256 * 1024:
+                            raise AssertionError("download-settings did not use the separate endpoint")
+                        result["checks"]["download-relay-bytes"] = relay.transferred
+                    if server.poll() is not None or client.poll() is not None:
+                        raise RuntimeError("proxy exited during transfers")
             if case["variant"] == "pinned-cert":
                 mihomo["proxies"][0]["uuid"] = "00000000-0000-4000-8000-000000000001"
                 write_json(directory / "mihomo-wrong-uuid.json", mihomo)
@@ -397,12 +532,15 @@ def run_case(case, args, root, creds, plain_port, tls_port, udp_port):
                              directory, "mihomo-wrong-uuid.log") as client:
                     ready(client, socks_port)
                     ready_mihomo(client, socks_port, panel.server_port)
-                    try:
-                        transfer(socks_port, plain_port)
-                    except (OSError, EOFError, http.client.HTTPException):
-                        result["checks"]["wrong-uuid-rejected"] = True
-                    else:
-                        raise AssertionError("wrong UUID unexpectedly passed a transfer")
+                    result["checks"]["wrong-uuid-rejected"] = expect_rejected(socks_port, plain_port)
+                mihomo["proxies"][0]["uuid"] = UUID
+                mihomo["proxies"][0]["fingerprint"] = "00" * 32
+                write_json(directory / "mihomo-wrong-pin.json", mihomo)
+                with process([args.mihomo, "-d", str(directory), "-f", "mihomo-wrong-pin.json"],
+                             directory, "mihomo-wrong-pin.log") as client:
+                    ready(client, socks_port)
+                    ready_mihomo(client, socks_port, panel.server_port)
+                    result["checks"]["wrong-certificate-pin-rejected"] = expect_rejected(socks_port, plain_port)
             result.pop("phase", None)
             result["status"] = "PASS"
     except Exception as exc:
@@ -417,6 +555,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--proxynode", required=True)
     parser.add_argument("--mihomo", required=True)
+    parser.add_argument("--xray", required=True, help="Matching fork binary for ML-DSA verifier checks")
+    parser.add_argument("--expected-version", default=VERSION, help="Exact pinned client version token")
+    parser.add_argument("--client-source", help="Immutable URL of the tested client archive")
+    parser.add_argument("--client-archive-sha256", help="Verified client archive digest")
     parser.add_argument("--output", help="New directory for configs, logs, and report (default: temporary directory)")
     parser.add_argument("--case", action="append", help="Run exact case name (repeatable); defaults to full matrix")
     parser.add_argument("--list", action="store_true")
@@ -432,14 +574,15 @@ def main():
         matrix = [case for case in matrix if case["name"] in args.case]
     args.proxynode = str(Path(args.proxynode).resolve())
     args.mihomo = str(Path(args.mihomo).resolve())
+    args.xray = str(Path(args.xray).resolve())
     version = subprocess.check_output([args.mihomo, "-v"], text=True).strip()
-    if f" {VERSION} " not in version:
-        parser.error(f"expected Mihomo {VERSION}, found {version}")
+    if f" {args.expected_version} " not in version:
+        parser.error(f"expected Mihomo {args.expected_version}, found {version}")
     root = Path(args.output).resolve() if args.output else Path(tempfile.mkdtemp(prefix="mihomo-interop-"))
     if args.output:
         root.mkdir(parents=True, exist_ok=False)
     print(f"Artifacts: {root}", flush=True)
-    creds = credentials(root)
+    creds = credentials(root, args.xray)
     plain = http.server.ThreadingHTTPServer((HOST, 0), EchoHandler)
     tls = TLSHTTPServer((HOST, 0), EchoHandler)
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -453,13 +596,15 @@ def main():
         results = [run_case(case, args, root, creds, plain.server_port, tls.server_port,
                             udp.server_address[1]) for case in matrix]
     report = {"mihomo_version": version, "mihomo_sha256": file_sha256(args.mihomo),
-              "proxynode_sha256": file_sha256(args.proxynode),
+              "client_source": args.client_source, "client_archive_sha256": args.client_archive_sha256,
+              "proxynode_sha256": file_sha256(args.proxynode), "xray_sha256": file_sha256(args.xray),
               "results": results,
-              "unsupported": ["Mihomo v1.19.33 defaults to XUDP; xudp:false does not select raw VLESS UDP.",
-                              "Vision is only tested with TCP + TLS/REALITY; transport combinations are not assumed valid."],
-              "known_incompatible": ["REALITY without support-x25519mlkem768:true is rejected by this Xray/REALITY version."],
-              "not_tested": ["IPv6, CDN/reverse proxies, Mux, REALITY ML-DSA, packetaddr",
-                             "XHTTP separate download settings, every encryption key/padding/transport permutation"]}
+              "unsupported": ["Mihomo ML-DSA-65 verification is not configured; its ML-DSA case proves legacy connectivity only.",
+                              "Mihomo uses XUDP by default; packetaddr is not tested."],
+              "known_incompatible": ["REALITY without support-x25519mlkem768:true is rejected.",
+                                     "Minimum-version cases probe acceptance at 1.8.2 and rejection at 26.3.27; they do not measure the exact advertised wire version."],
+              "not_tested": ["IPv6, external CDN/reverse proxies, packetaddr, every encryption key/padding/transport permutation",
+                             "ML-DSA camouflage-target hybrid key exchange (local OpenSSL target)"]}
     write_json(root / "report.json", report)
     failed = sum(result["status"] != "PASS" for result in results)
     print(f"{len(results) - failed}/{len(results)} passed; report: {root / 'report.json'}", flush=True)
