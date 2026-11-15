@@ -556,6 +556,9 @@ def main():
     parser.add_argument("--proxynode", required=True)
     parser.add_argument("--mihomo", required=True)
     parser.add_argument("--xray", required=True, help="Matching fork binary for ML-DSA verifier checks")
+    parser.add_argument("--expected-version", default=VERSION, help="Exact pinned client version token")
+    parser.add_argument("--client-source", help="Immutable URL of the tested client archive")
+    parser.add_argument("--client-archive-sha256", help="Verified client archive digest")
     parser.add_argument("--output", help="New directory for configs, logs, and report (default: temporary directory)")
     parser.add_argument("--case", action="append", help="Run exact case name (repeatable); defaults to full matrix")
     parser.add_argument("--list", action="store_true")
@@ -573,8 +576,8 @@ def main():
     args.mihomo = str(Path(args.mihomo).resolve())
     args.xray = str(Path(args.xray).resolve())
     version = subprocess.check_output([args.mihomo, "-v"], text=True).strip()
-    if f" {VERSION} " not in version:
-        parser.error(f"expected Mihomo {VERSION}, found {version}")
+    if f" {args.expected_version} " not in version:
+        parser.error(f"expected Mihomo {args.expected_version}, found {version}")
     root = Path(args.output).resolve() if args.output else Path(tempfile.mkdtemp(prefix="mihomo-interop-"))
     if args.output:
         root.mkdir(parents=True, exist_ok=False)
@@ -593,9 +596,10 @@ def main():
         results = [run_case(case, args, root, creds, plain.server_port, tls.server_port,
                             udp.server_address[1]) for case in matrix]
     report = {"mihomo_version": version, "mihomo_sha256": file_sha256(args.mihomo),
+              "client_source": args.client_source, "client_archive_sha256": args.client_archive_sha256,
               "proxynode_sha256": file_sha256(args.proxynode), "xray_sha256": file_sha256(args.xray),
               "results": results,
-              "unsupported": ["Mihomo v1.19.34 has no ML-DSA-65 verification option; its ML-DSA case proves legacy connectivity only.",
+              "unsupported": ["Mihomo ML-DSA-65 verification is not configured; its ML-DSA case proves legacy connectivity only.",
                               "Mihomo uses XUDP by default; packetaddr is not tested."],
               "known_incompatible": ["REALITY without support-x25519mlkem768:true is rejected.",
                                      "Mihomo advertises REALITY client version 1.8.2 and is rejected by minClientVer26.3.27."],

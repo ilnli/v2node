@@ -4,22 +4,52 @@ set -euo pipefail
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 version=v1.19.34
 sha256=223fab877e5795ce780ba39902e5f0b1113c1256ae244a7160f1165e017e9ccc
+source=${MIHOMO_SOURCE:-official}
+openclash_ref=5810424b40be9324db7595514882f324c2258798
+case "$source" in
+  official) ;;
+  openclash-master-meta)
+    version=alpha-gbc76c13
+    sha256=367130a1f3a99fbcd1a6acc1f2a5fc53ce43bef5af4f3278854de27694ccfa0c ;;
+  openclash-dev-meta)
+    version=alpha-g184857c
+    sha256=a4ad618f50a64a0c6f414ddd19e808e122efe5fd8e54617d1f3efaa8e64f233b ;;
+  openclash-master-smart)
+    version=alpha-smart-gdaf3ad0
+    sha256=dbcff108ee8b83cbeeaf31cab0ba1e2f670e55765d8affc36df7faaf7400abc4 ;;
+  openclash-dev-smart)
+    version=alpha-smart-gc4df732
+    sha256=dd12465b256ec8a40bebba2774a8caaeea809308c85cf577dd1ffe34433901ca ;;
+  *) echo "Unknown pinned Mihomo source: $source" >&2; exit 2 ;;
+esac
 if [[ $(uname -s) != Linux || $(uname -m) != x86_64 ]]; then
   echo 'The pinned interoperability client is Linux amd64 only.' >&2
   exit 1
 fi
 cache=${MIHOMO_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/proxynode-interop}
 mkdir -p "$cache"
-archive="$cache/mihomo-linux-amd64-$version.gz"
+if [[ $source == official ]]; then
+  archive="$cache/mihomo-linux-amd64-$version.gz"
+  url="https://github.com/MetaCubeX/mihomo/releases/download/$version/mihomo-linux-amd64-$version.gz"
+else
+  channel=${source#openclash-}
+  channel=${channel/-/\/}
+  archive="$cache/$source-$openclash_ref.tar.gz"
+  url="https://raw.githubusercontent.com/vernesong/OpenClash/$openclash_ref/$channel/clash-linux-amd64-compatible.tar.gz"
+fi
 if [[ ! -f $archive ]]; then
   curl -4 -fL --retry 3 --connect-timeout 15 --max-time 180 \
-    "https://github.com/MetaCubeX/mihomo/releases/download/$version/mihomo-linux-amd64-$version.gz" \
+    "$url" \
     -o "$archive.part"
   mv "$archive.part" "$archive"
 fi
 printf '%s  %s\n' "$sha256" "$archive" | sha256sum --check --status
-client="$cache/mihomo-$version"
-gzip -dc "$archive" > "$client"
+client="$cache/$source-$version"
+if [[ $source == official ]]; then
+  gzip -dc "$archive" > "$client"
+else
+  tar -xOzf "$archive" clash > "$client"
+fi
 chmod +x "$client"
 
 build_dir=''
@@ -36,4 +66,5 @@ if [[ -z $xray ]]; then
   xray="$build_dir/xray"
   (cd "$repo" && GOEXPERIMENT=jsonv2 go build -o "$xray" github.com/xtls/xray-core/main)
 fi
-python3 "$repo/tests/interop/mihomo.py" --proxynode "$binary" --mihomo "$client" --xray "$xray" "$@"
+python3 "$repo/tests/interop/mihomo.py" --proxynode "$binary" --mihomo "$client" --xray "$xray" \
+  --expected-version "$version" --client-source "$url" --client-archive-sha256 "$sha256" "$@"

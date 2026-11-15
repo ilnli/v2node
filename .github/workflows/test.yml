@@ -25,14 +25,33 @@ jobs:
       - run: go test ./...
       - run: go test -race ./common/audit ./common/task ./common/trafficqueue ./core ./core/app/dispatcher ./node ./managed ./gateway
       - run: CGO_ENABLED=0 go build -trimpath -o build_assets/proxynode .
+        id: build
       - name: Verify managed lifecycle with real worker processes
         run: python3 tests/interop/managed.py --proxynode "$PWD/build_assets/proxynode"
       - name: Verify real Mihomo VLESS interoperability
         run: PROXYNODE_BIN="$PWD/build_assets/proxynode" bash script/test-mihomo.sh --output "$RUNNER_TEMP/mihomo-interop"
+      - name: Verify pinned OpenClash core variants
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          status=0
+          for channel in master-meta dev-meta master-smart dev-smart; do
+            if ! MIHOMO_SOURCE="openclash-$channel" PROXYNODE_BIN="$PWD/build_assets/proxynode" \
+              bash script/test-mihomo.sh --output "$RUNNER_TEMP/openclash-interop/$channel"; then
+              status=1
+            fi
+          done
+          exit "$status"
       - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: mihomo-interop-${{ github.run_id }}
           path: ${{ runner.temp }}/mihomo-interop
+          retention-days: 7
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: openclash-interop-${{ github.run_id }}
+          path: ${{ runner.temp }}/openclash-interop
           retention-days: 7
           if-no-files-found: warn
